@@ -140,6 +140,48 @@ func TestUpdater_Check(t *testing.T) {
 	}
 }
 
+func TestUpdater_LegacyRCComparisonPreservesTags(t *testing.T) {
+	for _, latest := range []string{legacyRC10, dottedRC10} {
+		t.Run(latest, func(t *testing.T) {
+			checkLegacyRCTags(t, latest)
+		})
+	}
+}
+
+func checkLegacyRCTags(t *testing.T, latest string) {
+	t.Helper()
+	src := &fakeSource{list: []Release{
+		{Tag: latest, Prerelease: true},
+		{Tag: legacyRC9, Prerelease: true},
+		{Tag: tagV0100},
+	}}
+	u, out, _, inst := newTestUpdater(legacyRC9, src, &MemStore{Current: ChannelRC}, "")
+	res, err := u.Check(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Current != legacyRC9 || res.Latest != latest || res.Cmp <= 0 {
+		t.Fatalf("Check: got %+v", res)
+	}
+	var hookCalled bool
+	u.PreInstall = func(_ context.Context, current, target string) error {
+		hookCalled = true
+		if current != legacyRC9 || target != latest {
+			t.Errorf("PreInstall: got %q -> %q", current, target)
+		}
+		return nil
+	}
+	if err := u.Update(t.Context(), UpdateOptions{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !hookCalled || len(inst.tags) != 1 || inst.tags[0] != latest {
+		t.Fatalf("hook called: %v, installed tags: %v", hookCalled, inst.tags)
+	}
+	if !strings.Contains(out.String(), legacyRC9+" -> "+latest) {
+		t.Fatalf("output did not preserve tags: %s", out.String())
+	}
+}
+
 func TestUpdater_UpdateCheckOnlyPrintsAndDoesNotInstall(t *testing.T) {
 	src := &fakeSource{latest: Release{Tag: tagV200}}
 	u, out, _, inst := newTestUpdater(tagV100, src, nil, "")

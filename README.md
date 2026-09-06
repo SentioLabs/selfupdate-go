@@ -71,8 +71,10 @@ updater.PreInstall = func(ctx context.Context, current, latest string) error {
 
 - Stable: whatever your release tooling tags (`v1.3.0`).
 - Release candidates: tag the *next* version with a dotted counter,
-  `v1.4.0-rc.1`, `v1.4.0-rc.2`. Undotted counters (`rc10`) sort below `rc9`
-  under semver.
+  `v1.4.0-rc.1`, `v1.4.0-rc.2`. For compatibility, the updater compares
+  legacy counters numerically too: `rc9` sorts below `rc10`, and `rc10`
+  compares equal to `rc.10`. Displayed tags, pre-install hook arguments, and
+  installer tags retain their original spelling.
 - Nightlies: tag the *next patch* version, `v1.3.1-nightly.20260904`. A
   nightly tagged with the current released version sorts below that release
   and is never offered.
