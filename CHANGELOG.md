@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/SentioLabs/go-selfupdate/compare/v0.1.1...v0.1.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* compare legacy RC versions numerically ([798e6a3](https://github.com/SentioLabs/go-selfupdate/commit/798e6a37e29469910b3540ad50d68b487f277bbc))
+* compare legacy RC versions numerically ([98c8695](https://github.com/SentioLabs/go-selfupdate/commit/98c86952869c3f524af1807cb2aaf685fc994638))
+
 ## [0.1.1](https://github.com/SentioLabs/go-selfupdate/compare/v0.1.0...v0.1.1) (2026-09-04)
 
 
