@@ -11,8 +11,12 @@ import "testing"
 // v-prefixed input map to below. Naming them avoids repeating the string
 // literal enough times to trip goconst.
 const (
-	normV010 = "v0.1.0"
-	normRC1  = "v1.2.3-rc.1"
+	normV010   = "v0.1.0"
+	normRC1    = "v1.2.3-rc.1"
+	legacyRC9  = "v0.16.0-rc9"
+	legacyRC10 = "v0.16.0-rc10"
+	dottedRC9  = "v0.16.0-rc.9"
+	dottedRC10 = "v0.16.0-rc.10"
 )
 
 func TestNormalizeVersion(t *testing.T) {
@@ -23,6 +27,8 @@ func TestNormalizeVersion(t *testing.T) {
 		"v0.1.0":     normV010,
 		"1.2.3-rc.1": normRC1,
 		normRC1:      normRC1,
+		legacyRC9:    legacyRC9,
+		legacyRC10:   legacyRC10,
 	}
 	for in, want := range cases {
 		if got := NormalizeVersion(in); got != want {
@@ -44,6 +50,22 @@ func TestCompare(t *testing.T) {
 		{"v1.3.0", "v1.3.0-rc.9", -1},
 		{"v0.6.0", "v0.6.1-nightly.20260904", 1},
 		{"v0.6.1-nightly.20260904", "v0.6.1", 1},
+		{legacyRC9, legacyRC10, 1},
+		{legacyRC9, dottedRC10, 1},
+		{dottedRC9, legacyRC10, 1},
+		{legacyRC10, dottedRC10, 0},
+		{legacyRC10, legacyRC9, -1},
+		{dottedRC10, legacyRC9, -1},
+		{legacyRC10, dottedRC9, -1},
+		{legacyRC10, "v0.16.0", 1},
+		{"v0.16.0-rc99", "v0.16.0-rc100", 1},
+		{"v0.16.0-rc09", dottedRC9, 0},
+		{"v0.16.0-rc000", "v0.16.0-rc.0", 0},
+		{"v0.16.0-rc99999999999999999999", "v0.16.0-rc100000000000000000000", 1},
+		{legacyRC10 + "+build.1", dottedRC10 + "+build.2", 0},
+		{"v0.16.0+build-rc9", "v0.16.0+build-rc10", 0},
+		{"v0.16.0-alpha9", "v0.16.0-alpha10", -1},
+		{"v0.16.0-rc9.extra", "v0.16.0-rc10.extra", -1},
 	}
 	for _, c := range cases {
 		got := Compare(c.current, c.latest)
