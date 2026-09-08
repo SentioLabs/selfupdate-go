@@ -25,14 +25,19 @@ var version = "dev"
 // mock. Unset means api.github.com.
 const envAPI = "MYTOOL_GITHUB_API"
 
+const toolName = "mytool"
+
+// exitStartup is the exit code when the executable path cannot be resolved.
+const exitStartup = 2
+
 func main() {
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "mytool: locate executable:", err)
-		os.Exit(2)
+		_, _ = fmt.Fprintln(os.Stderr, toolName+": locate executable:", err)
+		os.Exit(exitStartup)
 	}
 	root := &cobra.Command{
-		Use:     "mytool",
+		Use:     toolName,
 		Short:   "Demo CLI for selfupdate-go",
 		Version: version,
 	}
@@ -48,9 +53,9 @@ func main() {
 // managed-path list are production behaviour.
 func newUpdater(exe string) *selfupdate.Updater {
 	return &selfupdate.Updater{
-		Name:        "mytool",
+		Name:        toolName,
 		Version:     version,
-		Source:      &selfupdate.GitHubSource{Owner: "acme", Repo: "mytool", BaseURL: os.Getenv(envAPI)},
+		Source:      &selfupdate.GitHubSource{Owner: "acme", Repo: toolName, BaseURL: os.Getenv(envAPI)},
 		Store:       &selfupdate.MemStore{},
 		Installer:   &selfupdate.ArchiveInstaller{},
 		PreInstall:  reportHook(exe, "pre-install"),
@@ -68,7 +73,8 @@ func reportHook(exe, name string) func(context.Context, string, string) error {
 		if err != nil {
 			return fmt.Errorf("%s: run %s --version: %w", name, exe, err)
 		}
-		fmt.Printf("%s: binary reports %s\n", name, strings.TrimSpace(string(out)))
+		//nolint:forbidigo
+		_, _ = fmt.Printf("%s: binary reports %s\n", name, strings.TrimSpace(string(out)))
 		return nil
 	}
 }
