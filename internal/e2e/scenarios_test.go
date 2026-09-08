@@ -178,6 +178,7 @@ func TestChecksumMismatch_LeavesBinary(t *testing.T) {
 		t.Fatalf("binary changed to %q", got)
 	}
 	assertNoHookLines(t, res.Stdout)
+	// Defensive: the checksum failure aborts in Prepare before any .new or .old exists.
 	assertNoLeftovers(t, bin)
 }
 
@@ -207,6 +208,9 @@ func TestSymlinkedPath_ReplacesTarget(t *testing.T) {
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
 		t.Fatal("the symlink must survive; only its target is replaced")
+	}
+	if got, err := os.Readlink(link); err != nil || got != realPath {
+		t.Fatalf("symlink now points at %q (err %v), want %q", got, err, realPath)
 	}
 	if !strings.Contains(res.Stdout, preLine+oldVersion) || !strings.Contains(res.Stdout, postLine+newVersion) {
 		t.Fatalf("hook lines missing:\n%s", res.Stdout)
