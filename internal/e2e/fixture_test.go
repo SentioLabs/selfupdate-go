@@ -155,8 +155,6 @@ func tarGzOf(t *testing.T, path string) []byte {
 }
 
 // installOld copies oldBinary to path at mode 0755, creating parent dirs.
-//
-//nolint:unused // called by the scenarios task built on this harness
 func installOld(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
