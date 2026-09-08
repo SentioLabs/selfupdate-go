@@ -55,7 +55,7 @@ The zero value works for a goreleaser project with default archive names.
 | Field | Default | Purpose |
 |---|---|---|
 | `Name` | base name of the running executable | binary name inside the archive |
-| `AssetTemplate` | `{name}_{version}_{os}_{arch}.tar.gz` | archive asset name; `{version}` has no leading `v` |
+| `AssetTemplate` | `{name}_{version}_{os}_{arch}.tar.gz` | archive asset name. `{version}` has no leading `v` |
 | `ChecksumAsset` | `checksums.txt` | goreleaser checksum file |
 | `SkipChecksum` | `false` | set when the repo publishes no checksum file |
 | `TargetPath` | running executable, symlinks resolved | file to replace |
@@ -68,11 +68,11 @@ lives under a package manager (the error names the manager and its upgrade
 command), refuses an unwritable directory, then downloads and verifies the
 archive into a temp directory. Nothing is downloaded when a check fails.
 `Commit` renames the extracted binary over the target and, on macOS, re-signs
-it ad hoc. On a terminal the download line shows a progress bar; elsewhere it
+it ad hoc. On a terminal the download line shows a progress bar. Elsewhere it
 is a single line.
 
 Linux and macOS with `.tar.gz` assets are supported. Windows is not.
-Verification proves the download matches what the release page lists; it
+Verification proves the download matches what the release page lists. It
 does not prove who published it. Signature checking is out of scope.
 
 ## Hooks
@@ -139,9 +139,9 @@ Installer: &selfupdate.ScriptInstaller{
   is still `selfupdate`.
 - `Installer` is two-phase. `Install(ctx, tag)` became
   `Prepare(ctx, rel) (Staged, error)`, and `Staged` has `Commit(ctx)` and
-  `Close()`. Custom installers implement both; `ScriptInstaller` already does.
+  `Close()`. Custom installers implement both. `ScriptInstaller` already does.
 - `Resolve` returns a `Release` instead of a tag string. `CheckResult` has a
-  `Release` field; `Latest` still holds the tag.
+  `Release` field. `Latest` still holds the tag.
 - `Release` carries `Assets`. `Updater` gains `PostInstall`.
 
 ## Compatibility
