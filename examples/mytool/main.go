@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -25,10 +26,14 @@ var version = "dev"
 // mock. Unset means api.github.com.
 const envAPI = "MYTOOL_GITHUB_API"
 
+// toolName is the name of the binary and GitHub repo.
 const toolName = "mytool"
 
 // exitStartup is the exit code when the executable path cannot be resolved.
 const exitStartup = 2
+
+// exitFailure is the exit code for general execution failures.
+const exitFailure = 1
 
 func main() {
 	exe, err := os.Executable()
@@ -42,24 +47,25 @@ func main() {
 		Version: version,
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
-	root.AddCommand(cobracmd.New(newUpdater(exe)))
+	root.AddCommand(cobracmd.New(newUpdater(root.OutOrStdout(), exe)))
 	if err := root.Execute(); err != nil {
-		os.Exit(1)
+		os.Exit(exitFailure)
 	}
 }
 
 // newUpdater mirrors the README wiring. Every ArchiveInstaller field is
 // left at its default so asset selection, target resolution and the
 // managed-path list are production behaviour.
-func newUpdater(exe string) *selfupdate.Updater {
+func newUpdater(w io.Writer, exe string) *selfupdate.Updater {
 	return &selfupdate.Updater{
-		Name:        toolName,
-		Version:     version,
-		Source:      &selfupdate.GitHubSource{Owner: "acme", Repo: toolName, BaseURL: os.Getenv(envAPI)},
+		Name:    toolName,
+		Version: version,
+		Source:  &selfupdate.GitHubSource{Owner: "acme", Repo: toolName, BaseURL: os.Getenv(envAPI)},
+		// MemStore keeps the channel for this process only; a real CLI persists it.
 		Store:       &selfupdate.MemStore{},
 		Installer:   &selfupdate.ArchiveInstaller{},
-		PreInstall:  reportHook(exe, "pre-install"),
-		PostInstall: reportHook(exe, "post-install"),
+		PreInstall:  reportHook(w, exe, "pre-install"),
+		PostInstall: reportHook(w, exe, "post-install"),
 	}
 }
 
@@ -67,14 +73,14 @@ func newUpdater(exe string) *selfupdate.Updater {
 // binary on disk reports. exe is resolved once at startup on purpose: after
 // the update, os.Executable() in this process points at the replaced file's
 // old inode, not the new binary.
-func reportHook(exe, name string) func(context.Context, string, string) error {
+func reportHook(w io.Writer, exe, name string) func(context.Context, string, string) error {
 	return func(ctx context.Context, _, _ string) error {
 		out, err := exec.CommandContext(ctx, exe, "--version").Output()
 		if err != nil {
+			// A failing hook aborts the update on purpose; the e2e suite relies on these lines.
 			return fmt.Errorf("%s: run %s --version: %w", name, exe, err)
 		}
-		//nolint:forbidigo
-		_, _ = fmt.Printf("%s: binary reports %s\n", name, strings.TrimSpace(string(out)))
+		_, _ = fmt.Fprintf(w, "%s: binary reports %s\n", name, strings.TrimSpace(string(out)))
 		return nil
 	}
 }
