@@ -24,8 +24,12 @@ type Updater struct {
 	Out       io.Writer     // nil means os.Stdout
 	ErrOut    io.Writer     // nil means os.Stderr
 	In        io.Reader     // nil means os.Stdin
-	// PreInstall runs after the user confirms and before Installer.Install.
+	// PreInstall runs after the user confirms and after Installer.Prepare has
+	// downloaded and verified the release, immediately before Staged.Commit.
 	PreInstall func(ctx context.Context, current, latest string) error
+	// PostInstall runs after Staged.Commit succeeds. Its error is reported
+	// with a note that the binary was already replaced.
+	PostInstall func(ctx context.Context, current, latest string) error
 }
 
 // UpdateOptions controls Update.
@@ -38,7 +42,8 @@ type UpdateOptions struct {
 // CheckResult is what Check found.
 type CheckResult struct {
 	Current string
-	Latest  string
+	Latest  string // Release.Tag, kept for callers that only print
+	Release Release
 	Channel Channel
 	Cmp     int // Compare(Current, Latest): 0 same, >0 update available, <0 current is newer
 }
@@ -93,21 +98,23 @@ func (u *Updater) Check(ctx context.Context) (CheckResult, error) {
 	if err != nil {
 		return CheckResult{}, err
 	}
-	latest, err := Resolve(ctx, u.Source, ch, u.channels())
+	rel, err := Resolve(ctx, u.Source, ch, u.channels())
 	if err != nil {
 		return CheckResult{}, err
 	}
 	return CheckResult{
 		Current: NormalizeVersion(u.Version),
-		Latest:  latest,
+		Latest:  rel.Tag,
+		Release: rel,
 		Channel: ch,
-		Cmp:     Compare(u.Version, latest),
+		Cmp:     Compare(u.Version, rel.Tag),
 	}, nil
 }
 
 // Update checks for a newer release on the current channel and, unless
-// opts.Check, installs it after confirmation. PreInstall runs between the
-// confirmation and the install.
+// opts.Check, installs it after confirmation. The installer prepares the
+// release first, then PreInstall runs, then the staged update is committed,
+// then PostInstall runs.
 //
 //nolint:revive // CLI output writes always succeed
 func (u *Updater) Update(ctx context.Context, opts UpdateOptions) error {
@@ -147,12 +154,31 @@ func (u *Updater) Update(ctx context.Context, opts UpdateOptions) error {
 	if u.Installer == nil {
 		return ErrNoInstaller
 	}
+	return u.install(ctx, res)
+}
+
+// install runs Prepare, PreInstall, Commit and PostInstall in that order.
+// Each step runs only when every earlier step succeeded.
+func (u *Updater) install(ctx context.Context, res CheckResult) error {
+	staged, err := u.Installer.Prepare(ctx, res.Release)
+	if err != nil {
+		return fmt.Errorf("prepare update: %w", err)
+	}
+	defer func() { _ = staged.Close() }()
 	if u.PreInstall != nil {
 		if err := u.PreInstall(ctx, res.Current, res.Latest); err != nil {
 			return fmt.Errorf("pre-install step failed: %w", err)
 		}
 	}
-	return u.Installer.Install(ctx, res.Latest)
+	if err := staged.Commit(ctx); err != nil {
+		return fmt.Errorf("install update: %w", err)
+	}
+	if u.PostInstall != nil {
+		if err := u.PostInstall(ctx, res.Current, res.Latest); err != nil {
+			return fmt.Errorf("post-install step failed (binary was updated): %w", err)
+		}
+	}
+	return nil
 }
 
 // SwitchChannel validates channel against the configured specs, shows the

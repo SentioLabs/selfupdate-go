@@ -23,10 +23,17 @@ const (
 	tagV100   = "v1.0.0"
 )
 
+type ghAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+}
+
 type ghFixture struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-	Draft      bool   `json:"draft"`
+	TagName    string    `json:"tag_name"`
+	Prerelease bool      `json:"prerelease"`
+	Draft      bool      `json:"draft"`
+	Assets     []ghAsset `json:"assets"`
 }
 
 func newGitHubTestServer(t *testing.T, latest ghFixture, list []ghFixture, wantAuth string) *httptest.Server {
@@ -134,5 +141,34 @@ func TestGitHubSource_ContextCancelled(t *testing.T) {
 	src := &GitHubSource{Owner: testOwner, Repo: testRepo, BaseURL: srv.URL}
 	if _, err := src.Latest(ctx); err == nil {
 		t.Fatal("expected context error")
+	}
+}
+
+func TestGitHubSource_DecodesAssets(t *testing.T) {
+	const tarball = "tool_1.2.3_linux_amd64.tar.gz"
+	const tarballSize, sumsSize, limit = 1234, 99, 10
+	latest := ghFixture{TagName: tagV123, Assets: []ghAsset{
+		{Name: tarball, BrowserDownloadURL: "https://dl.example/" + tarball, Size: tarballSize},
+		{Name: "checksums.txt", BrowserDownloadURL: "https://dl.example/checksums.txt", Size: sumsSize},
+	}}
+	srv := newGitHubTestServer(t, latest, []ghFixture{latest}, "")
+	defer srv.Close()
+	src := &GitHubSource{Owner: testOwner, Repo: testRepo, BaseURL: srv.URL}
+
+	rel, err := src.Latest(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Asset{Name: tarball, URL: "https://dl.example/" + tarball, Size: tarballSize}
+	if len(rel.Assets) != 2 || rel.Assets[0] != want {
+		t.Fatalf("Latest assets: got %+v, want first %+v", rel.Assets, want)
+	}
+
+	list, err := src.List(context.Background(), limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || len(list[0].Assets) != 2 || list[0].Assets[1].Name != "checksums.txt" {
+		t.Fatalf("List assets: %+v", list)
 	}
 }

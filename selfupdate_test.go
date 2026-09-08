@@ -31,6 +31,7 @@ func TestContracts(t *testing.T) {
 	r := Release{}
 	var _ string = r.Tag
 	var _ bool = r.Prerelease
+	var _ []Asset = r.Assets
 
 	u := Updater{}
 	var _ string = u.Name
@@ -48,6 +49,16 @@ func TestContracts(t *testing.T) {
 	c := CheckResult{}
 	var _ int = c.Cmp
 	var _ Channel = c.Channel
+	var _ Release = c.Release
+	var _ string = c.Latest
+
+	a := Asset{}
+	var _ string = a.Name
+	var _ string = a.URL
+	var _ int64 = a.Size
+
+	var _ func(context.Context, string, string) error = u.PreInstall
+	var _ func(context.Context, string, string) error = u.PostInstall
 
 	if len(DefaultChannels) != 3 {
 		t.Fatalf("DefaultChannels: want 3, got %d", len(DefaultChannels))
@@ -91,14 +102,37 @@ func TestDefaultPatterns(t *testing.T) {
 // already cover "v1.0.0" and "v0.10.0".
 const tagV200 = "v2.0.0"
 
+// recordingInstaller records Prepare and Commit calls. prepareErr fails
+// Prepare; commitErr fails Commit.
 type recordingInstaller struct {
-	tags []string
-	err  error
+	prepared   []string
+	committed  []string
+	closed     int
+	prepareErr error
+	commitErr  error
 }
 
-func (r *recordingInstaller) Install(_ context.Context, tag string) error {
-	r.tags = append(r.tags, tag)
-	return r.err
+func (r *recordingInstaller) Prepare(_ context.Context, rel Release) (Staged, error) {
+	r.prepared = append(r.prepared, rel.Tag)
+	if r.prepareErr != nil {
+		return nil, r.prepareErr
+	}
+	return &recordingStaged{installer: r, tag: rel.Tag}, nil
+}
+
+type recordingStaged struct {
+	installer *recordingInstaller
+	tag       string
+}
+
+func (s *recordingStaged) Commit(context.Context) error {
+	s.installer.committed = append(s.installer.committed, s.tag)
+	return s.installer.commitErr
+}
+
+func (s *recordingStaged) Close() error {
+	s.installer.closed++
+	return nil
 }
 
 func newTestUpdater(current string, src Source, store Store, in string,
@@ -174,8 +208,8 @@ func checkLegacyRCTags(t *testing.T, latest string) {
 	if err := u.Update(t.Context(), UpdateOptions{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !hookCalled || len(inst.tags) != 1 || inst.tags[0] != latest {
-		t.Fatalf("hook called: %v, installed tags: %v", hookCalled, inst.tags)
+	if !hookCalled || len(inst.committed) != 1 || inst.committed[0] != latest {
+		t.Fatalf("hook called: %v, installed tags: %v", hookCalled, inst.committed)
 	}
 	if !strings.Contains(out.String(), legacyRC9+" -> "+latest) {
 		t.Fatalf("output did not preserve tags: %s", out.String())
@@ -191,7 +225,7 @@ func TestUpdater_UpdateCheckOnlyPrintsAndDoesNotInstall(t *testing.T) {
 	if !strings.Contains(out.String(), "Update available: v1.0.0 -> v2.0.0 (stable channel)") {
 		t.Fatalf("output: %s", out.String())
 	}
-	if len(inst.tags) != 0 {
+	if len(inst.committed) != 0 {
 		t.Fatal("check must not install")
 	}
 }
@@ -202,8 +236,8 @@ func TestUpdater_UpdateUpToDateInstallsNothing(t *testing.T) {
 	if err := u.Update(context.Background(), UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "tool v1.0.0 (stable) is up to date") || len(inst.tags) != 0 {
-		t.Fatalf("output: %s, installs: %v", out.String(), inst.tags)
+	if !strings.Contains(out.String(), "tool v1.0.0 (stable) is up to date") || len(inst.committed) != 0 {
+		t.Fatalf("output: %s, installs: %v", out.String(), inst.committed)
 	}
 }
 
@@ -213,7 +247,7 @@ func TestUpdater_UpdateCurrentNewerInstallsNothing(t *testing.T) {
 	if err := u.Update(context.Background(), UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "is newer than the latest stable release v1.0.0") || len(inst.tags) != 0 {
+	if !strings.Contains(out.String(), "is newer than the latest stable release v1.0.0") || len(inst.committed) != 0 {
 		t.Fatalf("output: %s", out.String())
 	}
 }
@@ -229,8 +263,8 @@ func TestUpdater_UpdateYesRunsPreInstallThenInstall(t *testing.T) {
 	if err := u.Update(context.Background(), UpdateOptions{Yes: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(inst.tags) != 1 || inst.tags[0] != tagV200 {
-		t.Fatalf("installs: %v", inst.tags)
+	if len(inst.committed) != 1 || inst.committed[0] != tagV200 {
+		t.Fatalf("installs: %v", inst.committed)
 	}
 	if len(order) != 1 || order[0] != "pre:v1.0.0->v2.0.0" {
 		t.Fatalf("PreInstall not called correctly: %v", order)
@@ -244,8 +278,9 @@ func TestUpdater_UpdatePreInstallErrorStopsInstall(t *testing.T) {
 	if err := u.Update(context.Background(), UpdateOptions{Yes: true}); err == nil {
 		t.Fatal("expected error")
 	}
-	if len(inst.tags) != 0 {
-		t.Fatal("install must not run after PreInstall fails")
+	if len(inst.prepared) != 1 || len(inst.committed) != 0 {
+		t.Fatalf("Prepare must run before PreInstall and Commit must not: prepared=%v committed=%v",
+			inst.prepared, inst.committed)
 	}
 }
 
@@ -256,8 +291,8 @@ func TestUpdater_UpdatePromptDeclined(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Continue? [y/N]") ||
-		!strings.Contains(out.String(), "Update cancelled.") || len(inst.tags) != 0 {
-		t.Fatalf("output: %s, installs: %v", out.String(), inst.tags)
+		!strings.Contains(out.String(), "Update cancelled.") || len(inst.committed) != 0 {
+		t.Fatalf("output: %s, installs: %v", out.String(), inst.committed)
 	}
 }
 
@@ -267,8 +302,8 @@ func TestUpdater_UpdatePromptAccepted(t *testing.T) {
 	if err := u.Update(context.Background(), UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(inst.tags) != 1 {
-		t.Fatalf("installs: %v", inst.tags)
+	if len(inst.committed) != 1 {
+		t.Fatalf("installs: %v", inst.committed)
 	}
 }
 
@@ -278,8 +313,8 @@ func TestUpdater_UpdateForceReinstallsWhenUpToDate(t *testing.T) {
 	if err := u.Update(context.Background(), UpdateOptions{Force: true, Yes: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(inst.tags) != 1 || inst.tags[0] != tagV100 {
-		t.Fatalf("installs: %v", inst.tags)
+	if len(inst.committed) != 1 || inst.committed[0] != tagV100 {
+		t.Fatalf("installs: %v", inst.committed)
 	}
 }
 
@@ -388,5 +423,86 @@ func TestUpdater_SwitchChannelNoStore(t *testing.T) {
 	u := &Updater{Name: testRepo}
 	if err := u.SwitchChannel(ChannelRC, true); err == nil {
 		t.Fatal("nil store must be an error")
+	}
+}
+
+func TestUpdater_UpdatePrepareErrorSkipsPreInstall(t *testing.T) {
+	src := &fakeSource{latest: Release{Tag: tagV200}}
+	u, _, _, inst := newTestUpdater(tagV100, src, nil, "")
+	inst.prepareErr = errors.New("checksum mismatch")
+	var preRan bool
+	u.PreInstall = func(context.Context, string, string) error {
+		preRan = true
+		return nil
+	}
+	err := u.Update(context.Background(), UpdateOptions{Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "prepare update") {
+		t.Fatalf("got %v", err)
+	}
+	if preRan || len(inst.committed) != 0 {
+		t.Fatal("neither PreInstall nor Commit may run when Prepare fails")
+	}
+}
+
+func TestUpdater_UpdateHookOrder(t *testing.T) {
+	src := &fakeSource{latest: Release{Tag: tagV200}}
+	u, _, _, inst := newTestUpdater(tagV100, src, nil, "")
+	var order []string
+	u.PreInstall = func(context.Context, string, string) error {
+		order = append(order, "pre")
+		if len(inst.prepared) != 1 || len(inst.committed) != 0 {
+			t.Error("PreInstall must run after Prepare and before Commit")
+		}
+		return nil
+	}
+	u.PostInstall = func(_ context.Context, current, latest string) error {
+		order = append(order, "post:"+current+"->"+latest)
+		if len(inst.committed) != 1 {
+			t.Error("PostInstall must run after Commit")
+		}
+		return nil
+	}
+	if err := u.Update(context.Background(), UpdateOptions{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "pre,post:v1.0.0->v2.0.0" {
+		t.Fatalf("order: %s", got)
+	}
+	if inst.closed != 1 {
+		t.Fatalf("Close calls = %d, want 1", inst.closed)
+	}
+}
+
+func TestUpdater_UpdatePostInstallErrorSaysBinaryUpdated(t *testing.T) {
+	src := &fakeSource{latest: Release{Tag: tagV200}}
+	u, _, _, inst := newTestUpdater(tagV100, src, nil, "")
+	u.PostInstall = func(context.Context, string, string) error { return errors.New("server restart failed") }
+	err := u.Update(context.Background(), UpdateOptions{Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "binary was updated") {
+		t.Fatalf("got %v", err)
+	}
+	if len(inst.committed) != 1 {
+		t.Fatal("Commit must have run before PostInstall")
+	}
+}
+
+func TestUpdater_UpdateCommitErrorSkipsPostInstall(t *testing.T) {
+	src := &fakeSource{latest: Release{Tag: tagV200}}
+	u, _, _, inst := newTestUpdater(tagV100, src, nil, "")
+	inst.commitErr = errors.New("rename failed")
+	var postRan bool
+	u.PostInstall = func(context.Context, string, string) error {
+		postRan = true
+		return nil
+	}
+	err := u.Update(context.Background(), UpdateOptions{Yes: true})
+	if err == nil || !strings.Contains(err.Error(), "install update") {
+		t.Fatalf("got %v", err)
+	}
+	if postRan {
+		t.Fatal("PostInstall must not run when Commit fails")
+	}
+	if inst.closed != 1 {
+		t.Fatalf("Close calls = %d, want 1", inst.closed)
 	}
 }

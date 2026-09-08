@@ -13,6 +13,22 @@ import (
 	"time"
 )
 
+// --- Contract assertions ---
+var (
+	_ Installer = (*ScriptInstaller)(nil)
+	_ Staged    = (*scriptStaged)(nil)
+)
+
+// installScript prepares and commits tag through s, mirroring Updater.Update.
+func installScript(ctx context.Context, s *ScriptInstaller, tag string) error {
+	staged, err := s.Prepare(ctx, Release{Tag: tag})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = staged.Close() }()
+	return staged.Commit(ctx)
+}
+
 // requireCurlAndBash skips the test when either tool is missing from PATH.
 func requireCurlAndBash(t *testing.T) {
 	t.Helper()
@@ -42,8 +58,8 @@ func TestScriptInstaller_RejectsUnsafeTag(t *testing.T) {
 		if _, err := s.command(bad); err == nil {
 			t.Errorf("tag %q must be rejected", bad)
 		}
-		if err := s.Install(context.Background(), bad); err == nil {
-			t.Errorf("Install with tag %q must fail before running anything", bad)
+		if err := installScript(context.Background(), s, bad); err == nil {
+			t.Errorf("Prepare with tag %q must fail before running anything", bad)
 		}
 	}
 }
@@ -59,7 +75,7 @@ func TestScriptInstaller_RunsScriptViaFileURL(t *testing.T) {
 	}
 	var out bytes.Buffer
 	s := &ScriptInstaller{ScriptURL: "file://" + script, Stdout: &out, Stderr: &out}
-	if err := s.Install(context.Background(), "v9.9.9"); err != nil {
+	if err := installScript(context.Background(), s, "v9.9.9"); err != nil {
 		t.Fatalf("install: %v, output: %s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "args: --force --tag=v9.9.9") {
@@ -73,7 +89,7 @@ func TestScriptInstaller_CurlFailureIsError(t *testing.T) {
 	missing := filepath.Join(dir, "does-not-exist.sh")
 	var out bytes.Buffer
 	s := &ScriptInstaller{ScriptURL: "file://" + missing, Stdout: &out, Stderr: &out}
-	if err := s.Install(context.Background(), "v1.0.0"); err == nil {
+	if err := installScript(context.Background(), s, "v1.0.0"); err == nil {
 		t.Fatalf("expected error when curl fails, got nil, output: %s", out.String())
 	}
 }
@@ -97,7 +113,7 @@ func TestScriptInstaller_CancelStopsPipeline(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- s.Install(ctx, "v1.0.0")
+		errCh <- installScript(ctx, s, "v1.0.0")
 	}()
 
 	time.Sleep(200 * time.Millisecond)
@@ -153,7 +169,29 @@ func TestScriptInstaller_NonZeroExitIsError(t *testing.T) {
 	}
 	var out bytes.Buffer
 	s := &ScriptInstaller{ScriptURL: "file://" + script, Stdout: &out, Stderr: &out}
-	if err := s.Install(context.Background(), "v1.0.0"); err == nil {
+	if err := installScript(context.Background(), s, "v1.0.0"); err == nil {
 		t.Fatal("expected error from exit 3")
+	}
+}
+
+func TestScriptInstaller_PrepareRunsNothing(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	script := filepath.Join(dir, "install.sh")
+	body := "#!/usr/bin/env bash\ntouch " + marker + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil { //nolint:gosec // script must be executable
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	s := &ScriptInstaller{ScriptURL: "file://" + script, Stdout: &out, Stderr: &out}
+	staged, err := s.Prepare(context.Background(), Release{Tag: tagV100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("Prepare must not run the script")
+	}
+	if err := staged.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
