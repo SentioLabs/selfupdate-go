@@ -72,6 +72,8 @@ func replaceFile(target string, src io.Reader, mode os.FileMode) error {
 }
 
 // writeFile streams src into path with mode, removing the file on failure.
+// The mode is applied with Chmod after creation so the process umask cannot
+// narrow it.
 func writeFile(path string, src io.Reader, mode os.FileMode) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
@@ -79,6 +81,11 @@ func writeFile(path string, src io.Reader, mode os.FileMode) error {
 			return fmt.Errorf("%w: %s", ErrTargetNotWritable, filepath.Dir(path))
 		}
 		return fmt.Errorf("selfupdate: create %s: %w", path, err)
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return fmt.Errorf("selfupdate: set mode on %s: %w", path, err)
 	}
 	if _, err := io.Copy(f, src); err != nil {
 		_ = f.Close()
