@@ -55,7 +55,9 @@ func detectManaged(target string, list []ManagedInstall) (ManagedInstall, bool) 
 	return ManagedInstall{}, false
 }
 
-// managedError builds the error returned when detectManaged matches.
+// managedError builds the error returned when detectManaged matches. target
+// must be the same resolved path that was passed to detectManaged, so the
+// message names the file the check examined.
 func managedError(m ManagedInstall, name, target string) error {
 	hint := strings.ReplaceAll(m.Hint, "{name}", name)
 	return fmt.Errorf("%w: %s is installed by %s at %s; run '%s' instead",

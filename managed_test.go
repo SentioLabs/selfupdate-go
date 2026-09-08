@@ -8,15 +8,17 @@ import (
 	"testing"
 )
 
-const brewbrew = "Homebrew"
+// managerHomebrew names the literal repeated across the fixtures below so
+// its reuse doesn't trip goconst.
+const managerHomebrew = "Homebrew"
 
 func TestDetectManaged_Defaults(t *testing.T) {
 	cases := []struct {
 		path    string
 		manager string // "" means not managed
 	}{
-		{"/opt/homebrew/Cellar/arc/0.15.0/bin/arc", brewbrew},
-		{"/usr/local/Cellar/arc/0.15.0/bin/arc", brewbrew},
+		{"/opt/homebrew/Cellar/arc/0.15.0/bin/arc", managerHomebrew},
+		{"/usr/local/Cellar/arc/0.15.0/bin/arc", managerHomebrew},
 		{"/usr/bin/arc", "dpkg/rpm"},
 		{"/usr/lib/arc/arc", "dpkg/rpm"},
 		{"/nix/store/abc123-arc-0.15.0/bin/arc", "Nix"},
@@ -63,7 +65,7 @@ func TestManagedError(t *testing.T) {
 	if !errors.Is(err, ErrManagedInstall) {
 		t.Fatalf("must wrap ErrManagedInstall: %v", err)
 	}
-	for _, want := range []string{brewbrew, "brew upgrade arc", "/opt/homebrew/Cellar/arc/0.15.0/bin/arc"} {
+	for _, want := range []string{managerHomebrew, "brew upgrade arc", "/opt/homebrew/Cellar/arc/0.15.0/bin/arc"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message %q must contain %q", err.Error(), want)
 		}
