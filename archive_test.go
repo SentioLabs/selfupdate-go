@@ -96,6 +96,10 @@ func newTestInstaller(target string, out io.Writer) *ArchiveInstaller {
 func TestArchiveInstaller_PrepareThenCommit(t *testing.T) {
 	fx := newArchiveFixture(t, newBinary, false)
 	target := writeTarget(t, contentOld)
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out bytes.Buffer
 	inst := newTestInstaller(target, &out)
 
@@ -136,7 +140,7 @@ func TestArchiveInstaller_PrepareThenCommit(t *testing.T) {
 	wants := []string{
 		"Downloading " + fx.assetName,
 		"Verified " + fx.assetName,
-		"Installed tool " + tagV123 + " to " + target,
+		"Installed tool " + tagV123 + " to " + resolvedTarget,
 	}
 	for _, want := range wants {
 		if !strings.Contains(out.String(), want) {
