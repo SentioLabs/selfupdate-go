@@ -45,7 +45,10 @@ type ghRelease struct {
 	Assets     []ghAsset `json:"assets"`
 }
 
-// assetName renders the goreleaser default asset name for the running platform.
+// assetName renders the goreleaser default asset name for the running
+// platform. ArchiveInstaller derives the binary name from the resolved
+// target's base name, so every path a scenario installs to must end in
+// "mytool" (after following symlinks) for this name to match.
 func assetName(version string) string {
 	return fmt.Sprintf("%s_%s_%s_%s.tar.gz", repo, strings.TrimPrefix(version, "v"), runtime.GOOS, runtime.GOARCH)
 }
@@ -182,11 +185,16 @@ func run(t *testing.T, bin, api string, args ...string) runResult {
 	ctx, cancel := context.WithTimeout(t.Context(), runTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.WaitDelay = 10 * time.Second
 	cmd.Env = append(os.Environ(), envAPI+"="+api)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	res := runResult{Stdout: stdout.String(), Stderr: stderr.String()}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		t.Fatalf("run %s %v: timed out after %s\nstdout:\n%s\nstderr:\n%s",
+			bin, args, runTimeout, stdout.String(), stderr.String())
+	}
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
