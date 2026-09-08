@@ -1,4 +1,4 @@
-# go-selfupdate
+# selfupdate-go
 
 Self-update with release channels (stable, rc, nightly) for Go CLIs that
 publish GitHub releases. Used by [arc](https://github.com/SentioLabs/arc) and
@@ -20,8 +20,8 @@ publish GitHub releases. Used by [arc](https://github.com/SentioLabs/arc) and
 
 ```go
 import (
-    "github.com/sentiolabs/go-selfupdate"
-    "github.com/sentiolabs/go-selfupdate/cobracmd"
+    "github.com/sentiolabs/selfupdate-go"
+    "github.com/sentiolabs/selfupdate-go/cobracmd"
 )
 
 updater := &selfupdate.Updater{
