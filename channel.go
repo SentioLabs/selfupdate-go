@@ -57,14 +57,14 @@ func LookupChannel(specs []ChannelSpec, channel Channel) (ChannelSpec, bool) {
 	return ChannelSpec{}, false
 }
 
-// Resolve returns the tag a user on channel should be offered. An empty
+// Resolve returns the release a user on channel should be offered. An empty
 // channel means stable, which uses the forge's latest release. A patterned
-// channel returns its newest matching tag unless the newest stable release
-// is newer, in which case the stable tag is returned. A patterned channel
-// with no match falls back to the newest stable release. An unknown channel
-// is an error, as is a channel with no release at all. When the listed page
-// holds no stable release, Resolve asks Latest for one.
-func Resolve(ctx context.Context, src Source, channel Channel, specs []ChannelSpec) (string, error) {
+// channel returns its newest matching release unless the newest stable
+// release is newer, in which case the stable release is returned. A patterned
+// channel with no match falls back to the newest stable release. An unknown
+// channel is an error, as is a channel with no release at all. When the
+// listed page holds no stable release, Resolve asks Latest for one.
+func Resolve(ctx context.Context, src Source, channel Channel, specs []ChannelSpec) (Release, error) {
 	if specs == nil {
 		specs = DefaultChannels
 	}
@@ -73,59 +73,55 @@ func Resolve(ctx context.Context, src Source, channel Channel, specs []ChannelSp
 	}
 	spec, ok := LookupChannel(specs, channel)
 	if !ok {
-		return "", fmt.Errorf("unknown channel %q", channel)
+		return Release{}, fmt.Errorf("unknown channel %q", channel)
 	}
 	if spec.Pattern == nil {
-		rel, err := src.Latest(ctx)
-		if err != nil {
-			return "", err
-		}
-		return rel.Tag, nil
+		return src.Latest(ctx)
 	}
 
 	releases, err := src.List(ctx, maxPerPage)
 	if err != nil {
-		return "", err
+		return Release{}, err
 	}
 
-	channelTag, stableTag := newestMatch(releases, spec.Pattern)
-	if channelTag != "" && stableTag == "" {
+	channelRel, stableRel := newestMatch(releases, spec.Pattern)
+	if channelRel.Tag != "" && stableRel.Tag == "" {
 		rel, err := src.Latest(ctx)
 		if err != nil {
-			return "", err
+			return Release{}, err
 		}
 		if rel.Tag != "" && !rel.Prerelease {
-			stableTag = rel.Tag
+			stableRel = rel
 		}
 	}
 	switch {
-	case channelTag != "" && stableTag != "":
-		if semver.Compare(stableTag, channelTag) > 0 {
-			return stableTag, nil
+	case channelRel.Tag != "" && stableRel.Tag != "":
+		if semver.Compare(stableRel.Tag, channelRel.Tag) > 0 {
+			return stableRel, nil
 		}
-		return channelTag, nil
-	case channelTag != "":
-		return channelTag, nil
-	case stableTag != "":
-		return stableTag, nil
+		return channelRel, nil
+	case channelRel.Tag != "":
+		return channelRel, nil
+	case stableRel.Tag != "":
+		return stableRel, nil
 	default:
-		return "", fmt.Errorf("no %s release found", channel)
+		return Release{}, fmt.Errorf("no %s release found", channel)
 	}
 }
 
 // newestMatch scans releases, which List returns newest first, and returns
-// the first tag matching pattern and the first non-prerelease tag.
-func newestMatch(releases []Release, pattern *regexp.Regexp) (channelTag, stableTag string) {
+// the first release matching pattern and the first non-prerelease.
+func newestMatch(releases []Release, pattern *regexp.Regexp) (channelRel, stableRel Release) {
 	for _, r := range releases {
-		if channelTag == "" && pattern.MatchString(r.Tag) {
-			channelTag = r.Tag
+		if channelRel.Tag == "" && pattern.MatchString(r.Tag) {
+			channelRel = r
 		}
-		if stableTag == "" && !r.Prerelease {
-			stableTag = r.Tag
+		if stableRel.Tag == "" && !r.Prerelease {
+			stableRel = r
 		}
-		if channelTag != "" && stableTag != "" {
+		if channelRel.Tag != "" && stableRel.Tag != "" {
 			break
 		}
 	}
-	return channelTag, stableTag
+	return channelRel, stableRel
 }

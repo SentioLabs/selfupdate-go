@@ -74,9 +74,9 @@ func fixtureReleases() []Release {
 func TestResolve_StableUsesLatest(t *testing.T) {
 	src := &fakeSource{latest: Release{Tag: tagV0100}, list: fixtureReleases()}
 	for _, ch := range []Channel{ChannelStable, ""} {
-		tag, err := Resolve(context.Background(), src, ch, DefaultChannels)
-		if err != nil || tag != tagV0100 {
-			t.Fatalf("channel %q: got %q, %v", ch, tag, err)
+		rel, err := Resolve(context.Background(), src, ch, DefaultChannels)
+		if err != nil || rel.Tag != tagV0100 {
+			t.Fatalf("channel %q: got %q, %v", ch, rel.Tag, err)
 		}
 	}
 	if src.listCalls != 0 {
@@ -86,9 +86,9 @@ func TestResolve_StableUsesLatest(t *testing.T) {
 
 func TestResolve_RC(t *testing.T) {
 	src := &fakeSource{list: fixtureReleases()}
-	tag, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
-	if err != nil || tag != tagV0110RC3 {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
+	if err != nil || rel.Tag != tagV0110RC3 {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 }
 
@@ -98,17 +98,17 @@ func TestResolve_RCStableIsNewer(t *testing.T) {
 		{Tag: tagV0110RC3, Prerelease: true},
 		{Tag: tagV0100},
 	}}
-	tag, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
-	if err != nil || tag != "v0.12.0" {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
+	if err != nil || rel.Tag != "v0.12.0" {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 }
 
 func TestResolve_Nightly(t *testing.T) {
 	src := &fakeSource{list: fixtureReleases()}
-	tag, err := Resolve(context.Background(), src, ChannelNightly, DefaultChannels)
-	if err != nil || tag != "v0.11.0-nightly.20260302" {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelNightly, DefaultChannels)
+	if err != nil || rel.Tag != "v0.11.0-nightly.20260302" {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 }
 
@@ -117,17 +117,17 @@ func TestResolve_NightlyStableIsNewer(t *testing.T) {
 		{Tag: "v0.11.0"},
 		{Tag: "v0.10.0-nightly.20260302", Prerelease: true},
 	}}
-	tag, err := Resolve(context.Background(), src, ChannelNightly, DefaultChannels)
-	if err != nil || tag != "v0.11.0" {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelNightly, DefaultChannels)
+	if err != nil || rel.Tag != "v0.11.0" {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 }
 
 func TestResolve_NoChannelMatchFallsBackToStable(t *testing.T) {
 	src := &fakeSource{list: []Release{{Tag: tagV0100}}}
-	tag, err := Resolve(context.Background(), src, ChannelNightly, DefaultChannels)
-	if err != nil || tag != tagV0100 {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelNightly, DefaultChannels)
+	if err != nil || rel.Tag != tagV0100 {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 }
 
@@ -148,9 +148,9 @@ func TestResolve_UnknownChannel(t *testing.T) {
 
 func TestResolve_NilSpecsMeansDefaults(t *testing.T) {
 	src := &fakeSource{list: fixtureReleases()}
-	tag, err := Resolve(context.Background(), src, ChannelRC, nil)
-	if err != nil || tag != tagV0110RC3 {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelRC, nil)
+	if err != nil || rel.Tag != tagV0110RC3 {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 }
 
@@ -167,9 +167,9 @@ func TestResolve_SourceErrorsPropagate(t *testing.T) {
 
 func TestResolve_OverflowPageFallsBackToLatest(t *testing.T) {
 	src := &fakeSource{list: manyRCReleases(), latest: Release{Tag: tagV0190}}
-	tag, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
-	if err != nil || tag != tagV0200RC101 {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
+	if err != nil || rel.Tag != tagV0200RC101 {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 	if src.latestCalls != 1 {
 		t.Fatalf("latestCalls = %d, want 1", src.latestCalls)
@@ -178,9 +178,9 @@ func TestResolve_OverflowPageFallsBackToLatest(t *testing.T) {
 
 func TestResolve_OverflowPageStableNewerViaLatest(t *testing.T) {
 	src := &fakeSource{list: manyRCReleases(), latest: Release{Tag: tagV0210}}
-	tag, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
-	if err != nil || tag != tagV0210 {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
+	if err != nil || rel.Tag != tagV0210 {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 	if src.latestCalls != 1 {
 		t.Fatalf("latestCalls = %d, want 1", src.latestCalls)
@@ -200,11 +200,23 @@ func TestResolve_OverflowPageIgnoresPrereleaseLatest(t *testing.T) {
 		list:   manyRCReleases(),
 		latest: Release{Tag: "v0.21.0-rc.1", Prerelease: true},
 	}
-	tag, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
-	if err != nil || tag != tagV0200RC101 {
-		t.Fatalf("got %q, %v", tag, err)
+	rel, err := Resolve(context.Background(), src, ChannelRC, DefaultChannels)
+	if err != nil || rel.Tag != tagV0200RC101 {
+		t.Fatalf("got %q, %v", rel.Tag, err)
 	}
 	if src.latestCalls != 1 {
 		t.Fatalf("latestCalls = %d, want 1", src.latestCalls)
+	}
+}
+
+func TestResolve_ReturnsAssets(t *testing.T) {
+	asset := Asset{Name: "tool.tar.gz", URL: "https://dl.example/tool.tar.gz", Size: 1}
+	src := &fakeSource{list: []Release{
+		{Tag: tagV0110RC3, Prerelease: true, Assets: []Asset{asset}},
+		{Tag: tagV0100},
+	}}
+	rel, err := Resolve(context.Background(), src, ChannelRC, nil)
+	if err != nil || rel.Tag != tagV0110RC3 || len(rel.Assets) != 1 || rel.Assets[0] != asset {
+		t.Fatalf("got %+v, %v", rel, err)
 	}
 }

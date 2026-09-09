@@ -9,10 +9,18 @@ import (
 	"strings"
 )
 
+// Asset is one downloadable file attached to a release.
+type Asset struct {
+	Name string
+	URL  string // browser_download_url
+	Size int64
+}
+
 // Release is the subset of a forge release the library needs.
 type Release struct {
 	Tag        string
 	Prerelease bool
+	Assets     []Asset
 }
 
 // Source lists releases. Implementations must return List newest first.
@@ -36,11 +44,28 @@ type GitHubSource struct {
 	Client  *http.Client // default http.DefaultClient
 }
 
+// githubAsset is the subset of GitHub's asset JSON the library reads.
+type githubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+}
+
 // githubRelease is the subset of GitHub's release JSON the library reads.
 type githubRelease struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-	Draft      bool   `json:"draft"`
+	TagName    string        `json:"tag_name"`
+	Prerelease bool          `json:"prerelease"`
+	Draft      bool          `json:"draft"`
+	Assets     []githubAsset `json:"assets"`
+}
+
+// release converts the GitHub payload into the library's Release.
+func (r githubRelease) release() Release {
+	assets := make([]Asset, 0, len(r.Assets))
+	for _, a := range r.Assets {
+		assets = append(assets, Asset{Name: a.Name, URL: a.BrowserDownloadURL, Size: a.Size})
+	}
+	return Release{Tag: r.TagName, Prerelease: r.Prerelease, Assets: assets}
 }
 
 // Latest returns the release GitHub marks as latest (never a prerelease).
@@ -49,7 +74,7 @@ func (g *GitHubSource) Latest(ctx context.Context) (Release, error) {
 	if err := g.get(ctx, "/releases/latest", &rel); err != nil {
 		return Release{}, err
 	}
-	return Release{Tag: rel.TagName, Prerelease: rel.Prerelease}, nil
+	return rel.release(), nil
 }
 
 // List returns up to limit releases, newest first, without drafts. A limit
@@ -67,7 +92,7 @@ func (g *GitHubSource) List(ctx context.Context, limit int) ([]Release, error) {
 		if r.Draft {
 			continue
 		}
-		out = append(out, Release{Tag: r.TagName, Prerelease: r.Prerelease})
+		out = append(out, r.release())
 	}
 	return out, nil
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sentiolabs/go-selfupdate"
-	"github.com/sentiolabs/go-selfupdate/cobracmd"
+	"github.com/sentiolabs/selfupdate-go"
+	"github.com/sentiolabs/selfupdate-go/cobracmd"
 	"github.com/spf13/cobra"
 )
 

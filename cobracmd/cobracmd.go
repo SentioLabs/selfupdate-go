@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sentiolabs/go-selfupdate"
+	"github.com/sentiolabs/selfupdate-go"
 	"github.com/spf13/cobra"
 )
 

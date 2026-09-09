@@ -1,4 +1,4 @@
-module github.com/sentiolabs/go-selfupdate
+module github.com/sentiolabs/selfupdate-go
 
 go 1.26.0
 
