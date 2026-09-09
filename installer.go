@@ -27,6 +27,16 @@ type Staged interface {
 	Close() error
 }
 
+// Sweeper is implemented by installers that can remove leftovers of an
+// interrupted install without a release in hand. Updater.Update calls it
+// on every run, so a stale <target>.new left by a crash disappears the
+// next time the user runs the update command, even when nothing new is
+// available. A Sweep failure is reported as a warning and never blocks
+// the update.
+type Sweeper interface {
+	Sweep() error
+}
+
 // safeTag is the only shape of tag ScriptInstaller will place on a command
 // line: a release tag with no shell metacharacters.
 var safeTag = regexp.MustCompile(`^v?[0-9A-Za-z][0-9A-Za-z.+-]*$`)

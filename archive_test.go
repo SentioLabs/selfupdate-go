@@ -24,6 +24,7 @@ import (
 // --- Contract assertions ---
 var (
 	_ Installer = (*ArchiveInstaller)(nil)
+	_ Sweeper   = (*ArchiveInstaller)(nil)
 	_ Staged    = (*archiveStaged)(nil)
 )
 
@@ -323,6 +324,25 @@ func TestArchiveInstaller_DefaultClientHeaderTimeout(t *testing.T) {
 	inst = &ArchiveInstaller{Client: custom}
 	if inst.client() != custom {
 		t.Fatal("an explicit Client must be used as is")
+	}
+}
+
+func TestArchiveInstaller_SweepRemovesStaleNew(t *testing.T) {
+	target := writeTarget(t, contentOld)
+	writeStaleNew(t, target)
+	if err := newTestInstaller(target, io.Discard).Sweep(); err != nil {
+		t.Fatal(err)
+	}
+	assertNoLeftovers(t, target)
+	if got := readTarget(t, target); got != contentOld {
+		t.Fatalf("Sweep must not touch the target: %q", got)
+	}
+}
+
+func TestArchiveInstaller_SweepMissingTargetIsError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "gone")
+	if err := newTestInstaller(missing, io.Discard).Sweep(); err == nil {
+		t.Fatal("a target that cannot be resolved must be reported")
 	}
 }
 

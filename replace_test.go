@@ -101,6 +101,68 @@ func TestReplaceFile_NeverMovesTargetAside(t *testing.T) {
 	}
 }
 
+// writeStaleNew leaves a partial <target>.new beside target, as an install
+// interrupted before its rename would.
+func writeStaleNew(t *testing.T, target string) {
+	t.Helper()
+	if err := os.WriteFile(target+".new", []byte("partial"), 0o755); err != nil { //nolint:gosec // fixture
+		t.Fatal(err)
+	}
+}
+
+func TestRemoveStaleNew_RemovesRegularFile(t *testing.T) {
+	target := writeTarget(t, contentOld)
+	writeStaleNew(t, target)
+	if err := removeStaleNew(target); err != nil {
+		t.Fatal(err)
+	}
+	assertNoLeftovers(t, target)
+	if err := removeStaleNew(target); err != nil {
+		t.Fatalf("a missing .new is not an error: %v", err)
+	}
+}
+
+func TestRemoveStaleNew_LeavesDirectoryAlone(t *testing.T) {
+	target := writeTarget(t, contentOld)
+	if err := os.Mkdir(target+".new", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaleNew(target); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(target + ".new"); err != nil || !info.IsDir() {
+		t.Fatalf("directory must survive: %v, %v", info, err)
+	}
+}
+
+func TestRemoveStaleNew_LeavesSymlinkAlone(t *testing.T) {
+	target := writeTarget(t, contentOld)
+	if err := os.Symlink(target, target+".new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeStaleNew(target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(target + ".new"); err != nil {
+		t.Fatalf("symlink must survive: %v", err)
+	}
+	if got := readTarget(t, target); got != contentOld {
+		t.Fatalf("link target changed: %q", got)
+	}
+}
+
+func TestReplaceFile_RemovesStaleNewFirst(t *testing.T) {
+	target := writeTarget(t, contentOld)
+	writeStaleNew(t, target)
+	if err := replaceFile(target, strings.NewReader(contentNew), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := readTarget(t, target); got != contentNew {
+		t.Fatalf("content %q", got)
+	}
+	assertNoLeftovers(t, target)
+}
+
 func TestPreflightWritable_LeavesNoProbe(t *testing.T) {
 	dir := t.TempDir()
 	if err := preflightWritable(dir); err != nil {

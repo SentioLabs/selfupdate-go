@@ -102,14 +102,21 @@ func TestDefaultPatterns(t *testing.T) {
 // already cover "v1.0.0" and "v0.10.0".
 const tagV200 = "v2.0.0"
 
-// recordingInstaller records Prepare and Commit calls. prepareErr fails
-// Prepare; commitErr fails Commit.
+// recordingInstaller records Sweep, Prepare and Commit calls. prepareErr
+// fails Prepare; commitErr fails Commit; sweepErr fails Sweep.
 type recordingInstaller struct {
+	swept      int
 	prepared   []string
 	committed  []string
 	closed     int
+	sweepErr   error
 	prepareErr error
 	commitErr  error
+}
+
+func (r *recordingInstaller) Sweep() error {
+	r.swept++
+	return r.sweepErr
 }
 
 func (r *recordingInstaller) Prepare(_ context.Context, rel Release) (Staged, error) {
@@ -238,6 +245,35 @@ func TestUpdater_UpdateUpToDateInstallsNothing(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "tool v1.0.0 (stable) is up to date") || len(inst.committed) != 0 {
 		t.Fatalf("output: %s, installs: %v", out.String(), inst.committed)
+	}
+	if inst.swept != 1 {
+		t.Fatalf("Sweep must run once even when nothing is installed, ran %d times", inst.swept)
+	}
+}
+
+func TestUpdater_UpdateSweepErrorIsWarningOnly(t *testing.T) {
+	src := &fakeSource{latest: Release{Tag: tagV200}}
+	u, _, errOut, inst := newTestUpdater(tagV100, src, nil, "")
+	inst.sweepErr = errors.New("simulated sweep failure")
+	if err := u.Update(context.Background(), UpdateOptions{Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut.String(), "Warning: simulated sweep failure") {
+		t.Fatalf("warning missing: %q", errOut.String())
+	}
+	if len(inst.committed) != 1 {
+		t.Fatalf("the update must proceed past a sweep failure, installs: %v", inst.committed)
+	}
+}
+
+func TestUpdater_UpdateSweepRunsBeforeCheck(t *testing.T) {
+	src := &fakeSource{latestErr: errors.New("offline")}
+	u, _, _, inst := newTestUpdater(tagV100, src, nil, "")
+	if err := u.Update(context.Background(), UpdateOptions{}); err == nil {
+		t.Fatal("the check failure must still be returned")
+	}
+	if inst.swept != 1 {
+		t.Fatalf("Sweep must run even when the release check fails, ran %d times", inst.swept)
 	}
 }
 
