@@ -38,6 +38,10 @@ updater := &selfupdate.Updater{
 rootCmd.AddCommand(cobracmd.New(updater))
 ```
 
+A runnable version of this snippet lives in
+[`examples/mytool`](examples/mytool/main.go). Build it with
+`go build ./examples/mytool`.
+
 That adds:
 
 ```text
@@ -81,6 +85,10 @@ does not prove who published it. Signature checking is out of scope.
 before it replaces the running one. `PostInstall` runs after the replace.
 A `PostInstall` error is returned with a note that the binary was already
 updated.
+
+A hook that needs the binary's own path must resolve `os.Executable()`
+before the update starts. After the replace, the running process reports
+the old inode, not the new file. `examples/mytool` shows the pattern.
 
 ```go
 updater.PreInstall = func(ctx context.Context, current, latest string) error {
@@ -143,6 +151,14 @@ Installer: &selfupdate.ScriptInstaller{
 - `Resolve` returns a `Release` instead of a tag string. `CheckResult` has a
   `Release` field. `Latest` still holds the tag.
 - `Release` carries `Assets`. `Updater` gains `PostInstall`.
+
+## Testing
+
+`go test ./...` runs the unit suite and the end-to-end suite under
+`internal/e2e`. The end-to-end suite builds `examples/mytool` twice with
+different versions, serves a fake GitHub release from a local server, and
+updates one build to the other as a subprocess. It needs a Go toolchain on
+PATH and adds a few seconds. `go test -short ./...` skips it.
 
 ## Compatibility
 
