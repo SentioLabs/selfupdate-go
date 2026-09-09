@@ -63,7 +63,7 @@ The zero value works for a goreleaser project with default archive names.
 | `ChecksumAsset` | `checksums.txt` | goreleaser checksum file |
 | `SkipChecksum` | `false` | set when the repo publishes no checksum file |
 | `TargetPath` | running executable, symlinks resolved | file to replace |
-| `Managed` | Homebrew Cellar, `/usr/bin`, `/usr/lib`, Nix store | locations owned by a package manager |
+| `Managed` | Homebrew Cellar, `/usr/{s,}bin`, `/usr/lib{,64,exec}`, Nix store | locations owned by a package manager |
 | `Client` | default transport with a 30s response header timeout | HTTP client |
 | `Out` | `os.Stdout` | progress lines |
 

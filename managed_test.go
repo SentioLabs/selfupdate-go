@@ -8,9 +8,12 @@ import (
 	"testing"
 )
 
-// managerHomebrew names the literal repeated across the fixtures below so
-// its reuse doesn't trip goconst.
-const managerHomebrew = "Homebrew"
+// managerHomebrew and managerSystem name the literals repeated across the
+// fixtures below so their reuse doesn't trip goconst.
+const (
+	managerHomebrew = "Homebrew"
+	managerSystem   = "dpkg/rpm"
+)
 
 func TestDetectManaged_Defaults(t *testing.T) {
 	cases := []struct {
@@ -19,12 +22,21 @@ func TestDetectManaged_Defaults(t *testing.T) {
 	}{
 		{"/opt/homebrew/Cellar/arc/0.15.0/bin/arc", managerHomebrew},
 		{"/usr/local/Cellar/arc/0.15.0/bin/arc", managerHomebrew},
-		{"/usr/bin/arc", "dpkg/rpm"},
-		{"/usr/lib/arc/arc", "dpkg/rpm"},
+		{"/home/linuxbrew/.linuxbrew/Cellar/arc/0.15.0/bin/arc", managerHomebrew},
+		{"/opt/homebrew/Cellar/arc/0.15.0/sbin/arc", managerHomebrew},
+		{"/opt/homebrew/Cellar/arc/0.15.0/libexec/bin/arc", managerHomebrew},
+		{"/usr/bin/arc", managerSystem},
+		{"/usr/sbin/arc", managerSystem},
+		{"/usr/lib/arc/arc", managerSystem},
+		{"/usr/lib64/arc/arc", managerSystem},
+		{"/usr/libexec/arc/arc", managerSystem},
 		{"/nix/store/abc123-arc-0.15.0/bin/arc", "Nix"},
 		{"/usr/local/bin/arc", ""},
+		{"/usr/local/lib/arc/arc", ""},
+		{"/usr/libx/arc", ""},
 		{"/home/u/.local/bin/arc", ""},
 		{"/home/u/go/bin/arc", ""},
+		{"/home/u/projects/Cellar/bin/arc", ""},
 		{"/opt/arc/bin/arc", ""},
 	}
 	for _, tc := range cases {
