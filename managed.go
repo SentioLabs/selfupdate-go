@@ -16,17 +16,23 @@ type ManagedInstall struct {
 	Hint    string         // "{name}" is replaced with the binary name
 }
 
-// DefaultManagedInstalls covers Homebrew (any /Cellar/ path), system
-// package directories (/usr/bin, /usr/lib) and the Nix store.
-// /usr/local/bin and ~/.local/bin are not managed.
+// DefaultManagedInstalls covers Homebrew and Linuxbrew (a Cellar formula
+// directory), system package directories (/usr/bin, /usr/sbin, /usr/lib,
+// /usr/lib64, /usr/libexec) and the Nix store. /usr/local/bin and
+// ~/.local/bin are not managed. Patterns are case-sensitive; the target
+// comes from EvalSymlinks and so carries on-disk casing.
 var DefaultManagedInstalls = []ManagedInstall{
 	{
-		Pattern: regexp.MustCompile(`/Cellar/`),
+		// <prefix>/Cellar/<formula>/<version>/... Anything below the
+		// version directory is Homebrew's, whether bin, sbin or libexec.
+		// Requiring the two segments keeps a project directory that
+		// happens to be named Cellar from being refused.
+		Pattern: regexp.MustCompile(`/Cellar/[^/]+/[^/]+/`),
 		Manager: "Homebrew",
 		Hint:    "brew upgrade {name}",
 	},
 	{
-		Pattern: regexp.MustCompile(`^/usr/(bin|lib)/`),
+		Pattern: regexp.MustCompile(`^/usr/(s?bin|lib(64|exec)?)/`),
 		Manager: "dpkg/rpm",
 		Hint:    "upgrade {name} with your system package manager (apt, dnf, pacman)",
 	},

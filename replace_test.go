@@ -69,46 +69,35 @@ func TestReplaceFile_ReplacesAndCleansUp(t *testing.T) {
 	assertNoLeftovers(t, target)
 }
 
-func TestReplaceFile_FinalRenameFailureRestoresOriginal(t *testing.T) {
+func TestReplaceFile_RenameFailureLeavesOriginal(t *testing.T) {
 	target := writeTarget(t, contentOld)
-	swapRename(t, func(from, to string) error {
-		if from == target+".new" {
-			return errors.New("simulated rename failure")
-		}
-		return os.Rename(from, to)
+	swapRename(t, func(_, _ string) error {
+		return errors.New("simulated rename failure")
 	})
 	err := replaceFile(target, strings.NewReader(contentNew), 0o755)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	var rb *RollbackError
-	if errors.As(err, &rb) {
-		t.Fatalf("rollback succeeded, so the error must not be a RollbackError: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "install new binary") {
+		t.Fatalf("got %v", err)
 	}
 	if got := readTarget(t, target); got != contentOld {
-		t.Fatalf("original not restored: %q", got)
+		t.Fatalf("original changed: %q", got)
 	}
 	assertNoLeftovers(t, target)
 }
 
-func TestReplaceFile_RollbackFailureIsRollbackError(t *testing.T) {
+// TestReplaceFile_NeverMovesTargetAside pins the single-rename design: the
+// only rename is .new over target, so no crash can leave the target missing.
+func TestReplaceFile_NeverMovesTargetAside(t *testing.T) {
 	target := writeTarget(t, contentOld)
+	var renames [][2]string
 	swapRename(t, func(from, to string) error {
-		if to == target {
-			return errors.New("simulated: nothing may land on target")
-		}
+		renames = append(renames, [2]string{from, to})
 		return os.Rename(from, to)
 	})
-	err := replaceFile(target, strings.NewReader(contentNew), 0o755)
-	var rb *RollbackError
-	if !errors.As(err, &rb) {
-		t.Fatalf("want *RollbackError, got %v", err)
+	if err := replaceFile(target, strings.NewReader(contentNew), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if rb.Update == nil || rb.Rollback == nil {
-		t.Fatalf("both errors must be set: %+v", rb)
-	}
-	if !strings.Contains(err.Error(), "rollback failed") {
-		t.Fatalf("message must say rollback failed: %v", err)
+	if len(renames) != 1 || renames[0] != [2]string{target + ".new", target} {
+		t.Fatalf("renames %v, want exactly .new over target", renames)
 	}
 }
 
@@ -149,28 +138,6 @@ func TestPreflightWritable_MissingDir(t *testing.T) {
 	if err == nil || errors.Is(err, ErrTargetNotWritable) {
 		t.Fatalf("a missing directory is not a permission problem: %v", err)
 	}
-}
-
-func TestReplaceFile_FirstRenameFailureLeavesOriginal(t *testing.T) {
-	target := writeTarget(t, contentOld)
-	swapRename(t, func(from, to string) error {
-		if from == target {
-			return errors.New("simulated: cannot move target aside")
-		}
-		return os.Rename(from, to)
-	})
-	err := replaceFile(target, strings.NewReader(contentNew), 0o755)
-	if err == nil || !strings.Contains(err.Error(), "move old binary aside") {
-		t.Fatalf("got %v", err)
-	}
-	var rb *RollbackError
-	if errors.As(err, &rb) {
-		t.Fatalf("nothing to roll back, must not be RollbackError: %v", err)
-	}
-	if got := readTarget(t, target); got != contentOld {
-		t.Fatalf("original changed: %q", got)
-	}
-	assertNoLeftovers(t, target)
 }
 
 // failingReader errors after yielding a few bytes.
@@ -230,31 +197,5 @@ func TestReplaceFile_CreateFailureIsNotSentinel(t *testing.T) {
 	}
 	if got := readTarget(t, target); got != contentOld {
 		t.Fatalf("original changed: %q", got)
-	}
-}
-
-func TestReplaceFile_LeftoverRemovalFailureIsReported(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores directory permissions")
-	}
-	target := writeTarget(t, contentOld)
-	dir := filepath.Dir(target)
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	swapRename(t, func(from, to string) error {
-		if err := os.Rename(from, to); err != nil {
-			return err
-		}
-		if to == target {
-			// The new binary landed. Freeze the directory so the .old cleanup fails.
-			_ = os.Chmod(dir, 0o500)
-		}
-		return nil
-	})
-	err := replaceFile(target, strings.NewReader(contentNew), 0o755)
-	if err == nil || !strings.Contains(err.Error(), "could not be removed") {
-		t.Fatalf("got %v", err)
-	}
-	if got := readTarget(t, target); got != contentNew {
-		t.Fatalf("update did not land: %q", got)
 	}
 }
