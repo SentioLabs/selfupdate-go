@@ -75,6 +75,12 @@ archive into a temp directory. Nothing is downloaded when a check fails.
 it ad hoc. On a terminal the download line shows a progress bar. Elsewhere it
 is a single line.
 
+Every `Update` call first removes a stale `<target>.new` left by an install
+that was interrupted between writing the file and renaming it into place.
+The cleanup runs before the release check, so the file disappears the next
+time the user runs the command even when nothing new is available or the
+network is down. Only a regular file by that name is removed.
+
 Linux and macOS with `.tar.gz` assets are supported. Windows is not.
 Verification proves the download matches what the release page lists. It
 does not prove who published it. Signature checking is out of scope.

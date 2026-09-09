@@ -118,6 +118,7 @@ func (u *Updater) Check(ctx context.Context) (CheckResult, error) {
 //
 //nolint:revive // CLI output writes always succeed
 func (u *Updater) Update(ctx context.Context, opts UpdateOptions) error {
+	u.sweep()
 	res, err := u.Check(ctx)
 	if err != nil {
 		return fmt.Errorf("check for updates: %w", err)
@@ -155,6 +156,19 @@ func (u *Updater) Update(ctx context.Context, opts UpdateOptions) error {
 		return ErrNoInstaller
 	}
 	return u.install(ctx, res)
+}
+
+// sweep asks an Installer that implements Sweeper to remove leftovers of an
+// interrupted install. It runs before the release check so the cleanup
+// happens even when the network is down. A failure is a warning only.
+func (u *Updater) sweep() {
+	s, ok := u.Installer.(Sweeper)
+	if !ok {
+		return
+	}
+	if err := s.Sweep(); err != nil {
+		_, _ = fmt.Fprintf(u.errOut(), "Warning: %v\n", err)
+	}
 }
 
 // install runs Prepare, PreInstall, Commit and PostInstall in that order.
