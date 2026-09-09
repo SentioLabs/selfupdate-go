@@ -27,7 +27,10 @@ var (
 	_ Staged    = (*archiveStaged)(nil)
 )
 
-const newBinary = "#!/bin/sh\necho new\n"
+const (
+	newBinary     = "#!/bin/sh\necho new\n"
+	checksumsPath = "/checksums.txt"
+)
 
 // archiveFixture serves one release: a tarball for the running platform,
 // a checksums.txt, and decoys that must never be selected.
@@ -67,7 +70,7 @@ func newArchiveFixture(t *testing.T, body string, tamper bool) *archiveFixture {
 		w.Header().Set("Content-Length", strconv.Itoa(len(archive)))
 		_, _ = w.Write(archive)
 	})
-	mux.HandleFunc("/checksums.txt", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(checksumsPath, func(w http.ResponseWriter, r *http.Request) {
 		fx.record(r.URL.Path)
 		_, _ = io.WriteString(w, checksums)
 	})
@@ -82,7 +85,7 @@ func newArchiveFixture(t *testing.T, body string, tamper bool) *archiveFixture {
 		{Name: fx.assetName + ".sig", URL: fx.srv.URL + "/never.sig", Size: 1},
 		{Name: "tool_1.2.3_linux_amd64.deb", URL: fx.srv.URL + "/never.deb", Size: 1},
 		{Name: fx.assetName, URL: fx.srv.URL + "/" + fx.assetName, Size: int64(len(archive))},
-		{Name: DefaultChecksumAsset, URL: fx.srv.URL + "/checksums.txt", Size: int64(len(checksums))},
+		{Name: DefaultChecksumAsset, URL: fx.srv.URL + checksumsPath, Size: int64(len(checksums))},
 	}}
 	return fx
 }
@@ -110,7 +113,7 @@ func TestArchiveInstaller_PrepareThenCommit(t *testing.T) {
 	if got := readTarget(t, target); got != contentOld {
 		t.Fatalf("Prepare must not touch the target, got %q", got)
 	}
-	if got := fx.requested(); len(got) != 2 || got[0] != "/"+fx.assetName || got[1] != "/checksums.txt" {
+	if got := fx.requested(); len(got) != 2 || got[0] != "/"+fx.assetName || got[1] != checksumsPath {
 		t.Fatalf("requests %v", got)
 	}
 
@@ -194,7 +197,7 @@ func TestArchiveInstaller_SkipChecksum(t *testing.T) {
 	}
 	defer func() { _ = staged.Close() }()
 	for _, p := range fx.requested() {
-		if p == "/checksums.txt" {
+		if p == checksumsPath {
 			t.Fatal("checksums must not be fetched when SkipChecksum is set")
 		}
 	}
@@ -321,4 +324,66 @@ func TestArchiveInstaller_DefaultClientHeaderTimeout(t *testing.T) {
 	if inst.client() != custom {
 		t.Fatal("an explicit Client must be used as is")
 	}
+}
+
+// TestArchiveInstaller_ClientIsConcurrencySafe runs under -race: a shared
+// installer must not be mutated by client().
+func TestArchiveInstaller_ClientIsConcurrencySafe(t *testing.T) {
+	inst := &ArchiveInstaller{}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() { _ = inst.client() })
+	}
+	wg.Wait()
+	if inst.Client != nil {
+		t.Fatal("client() must leave the exported field untouched")
+	}
+}
+
+func TestArchiveInstaller_DownloadSizeMismatchIsRejected(t *testing.T) {
+	fx := newArchiveFixture(t, newBinary, false)
+	declared := fx.rel.Assets[2].Size
+	cases := []struct {
+		name string
+		size int64
+	}{
+		{"body longer than listed", declared - 1},
+		{"body shorter than listed", declared + 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assets := append([]Asset(nil), fx.rel.Assets...)
+			assets[2].Size = tc.size
+			rel := Release{Tag: fx.rel.Tag, Assets: assets}
+			target := writeTarget(t, contentOld)
+			staged, err := newTestInstaller(target, io.Discard).Prepare(context.Background(), rel)
+			if err == nil || !strings.Contains(err.Error(), "release lists") {
+				t.Fatalf("got %v", err)
+			}
+			if staged != nil {
+				t.Fatal("no staged update may be returned on failure")
+			}
+			if got := readTarget(t, target); got != contentOld {
+				t.Fatalf("target changed: %q", got)
+			}
+		})
+	}
+	for _, path := range fx.requested() {
+		if path == checksumsPath {
+			t.Fatal("the size check must fail before the checksum file is fetched")
+		}
+	}
+}
+
+func TestArchiveInstaller_UnknownSizeIsUnbounded(t *testing.T) {
+	fx := newArchiveFixture(t, newBinary, false)
+	assets := append([]Asset(nil), fx.rel.Assets...)
+	assets[2].Size = 0
+	rel := Release{Tag: fx.rel.Tag, Assets: assets}
+	target := writeTarget(t, contentOld)
+	staged, err := newTestInstaller(target, io.Discard).Prepare(context.Background(), rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = staged.Close()
 }

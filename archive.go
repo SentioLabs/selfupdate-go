@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,9 +38,14 @@ type ArchiveInstaller struct {
 	SkipChecksum  bool             // disable verification for repos that publish no checksum file
 	TargetPath    string           // default: os.Executable(); symlinks are always resolved
 	Managed       []ManagedInstall // nil means DefaultManagedInstalls; empty slice disables the check
-	Client        *http.Client     // default: DefaultTransport clone with a 30s ResponseHeaderTimeout
+	Client        *http.Client     // default: a shared DefaultTransport clone with a 30s ResponseHeaderTimeout
 	Out           io.Writer        // progress lines; default os.Stdout
 }
+
+// defaultClient is built on first use and shared by every ArchiveInstaller
+// without an explicit Client. Prepare never writes to the installer, so one
+// value may serve concurrent goroutines.
+var defaultClient = sync.OnceValue(newDefaultClient)
 
 // archiveStaged holds a verified, extracted binary waiting to be renamed
 // over the target.
@@ -103,7 +109,8 @@ func (a *ArchiveInstaller) stage(
 }
 
 // download streams asset.URL to path, drawing a progress bar on a
-// terminal, and returns the SHA-256 of the bytes written.
+// terminal, and returns the SHA-256 of the bytes written. When the release
+// lists a size the body must match it exactly.
 func (a *ArchiveInstaller) download(ctx context.Context, asset Asset, path string) ([]byte, error) {
 	a.printf("Downloading %s (%s)...\n", asset.Name, formatMB(asset.Size))
 	hash := sha256.New()
@@ -113,7 +120,7 @@ func (a *ArchiveInstaller) download(ctx context.Context, asset Asset, path strin
 			return fmt.Errorf("selfupdate: create download: %w", err)
 		}
 		progress := newProgressWriter(a.out(), resp.ContentLength)
-		_, copyErr := io.Copy(io.MultiWriter(f, hash, progress), resp.Body)
+		copyErr := copyBounded(io.MultiWriter(f, hash, progress), resp.Body, asset.Size)
 		progress.Finish()
 		if closeErr := f.Close(); copyErr == nil {
 			copyErr = closeErr
@@ -127,6 +134,25 @@ func (a *ArchiveInstaller) download(ctx context.Context, asset Asset, path strin
 		return nil, err
 	}
 	return hash.Sum(nil), nil
+}
+
+// copyBounded streams body into dst. A positive size caps the read one
+// byte past it, so a hostile payload cannot fill the temp dir before the
+// checksum rejects it, and a body of any other length is an error. A zero
+// or negative size means the release listed none and the body is unbounded.
+func copyBounded(dst io.Writer, body io.Reader, size int64) error {
+	if size <= 0 {
+		_, err := io.Copy(dst, body)
+		return err
+	}
+	n, err := io.Copy(dst, io.LimitReader(body, size+1))
+	if err != nil {
+		return err
+	}
+	if n != size {
+		return fmt.Errorf("body is %d bytes, release lists %d", n, size)
+	}
+	return nil
 }
 
 // verify downloads the checksum asset and checks sum against assetName's entry.
@@ -243,12 +269,12 @@ func (a *ArchiveInstaller) checksumAsset() string {
 	return DefaultChecksumAsset
 }
 
-// client returns Client, creating the default one on first use.
+// client returns Client, or the shared default. It never writes to a.
 func (a *ArchiveInstaller) client() *http.Client {
-	if a.Client == nil {
-		a.Client = newDefaultClient()
+	if a.Client != nil {
+		return a.Client
 	}
-	return a.Client
+	return defaultClient()
 }
 
 // newDefaultClient clones the default transport and bounds the wait for
