@@ -15,20 +15,6 @@ var ErrTargetNotWritable = errors.New("selfupdate: target directory is not writa
 // renameFile is os.Rename. Tests swap it to simulate a failed install.
 var renameFile = os.Rename
 
-// RollbackError reports that the update failed and the original binary
-// could not be restored. The install directory needs manual repair.
-type RollbackError struct {
-	Update   error
-	Rollback error
-}
-
-func (e *RollbackError) Error() string {
-	return fmt.Sprintf("selfupdate: update failed (%v) and rollback failed (%v)", e.Update, e.Rollback)
-}
-
-// Unwrap exposes the update error to errors.Is and errors.As.
-func (e *RollbackError) Unwrap() error { return e.Update }
-
 // preflightWritable creates and removes a temp file in dir. A permission
 // error is wrapped with ErrTargetNotWritable so callers can print a
 // specific hint. Other errors are returned as they are.
@@ -45,28 +31,19 @@ func preflightWritable(dir string) error {
 	return os.Remove(name)
 }
 
-// replaceFile installs src at target. It writes <target>.new, renames
-// target to <target>.old, renames .new over target and removes .old. When
-// the final rename fails it moves .old back and returns the rename error.
-// If that restore fails too it returns a *RollbackError.
+// replaceFile installs src at target. It writes <target>.new beside the
+// target and renames it over target. rename(2) replaces the file in one
+// step on Linux and macOS, so a failed rename leaves the original in
+// place and a crash at any point leaves the target present. The running
+// process keeps its unlinked inode and is unaffected.
 func replaceFile(target string, src io.Reader, mode os.FileMode) error {
-	newPath, oldPath := target+".new", target+".old"
+	newPath := target + ".new"
 	if err := writeFile(newPath, src, mode); err != nil {
 		return err
 	}
-	if err := renameFile(target, oldPath); err != nil {
-		_ = os.Remove(newPath)
-		return fmt.Errorf("selfupdate: move old binary aside: %w", err)
-	}
 	if err := renameFile(newPath, target); err != nil {
 		_ = os.Remove(newPath)
-		if rbErr := renameFile(oldPath, target); rbErr != nil {
-			return &RollbackError{Update: err, Rollback: rbErr}
-		}
 		return fmt.Errorf("selfupdate: install new binary: %w", err)
-	}
-	if err := os.Remove(oldPath); err != nil {
-		return fmt.Errorf("selfupdate: binary was updated but %s could not be removed: %w", oldPath, err)
 	}
 	return nil
 }
