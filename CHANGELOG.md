@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/SentioLabs/selfupdate-go/compare/v0.2.0...v0.2.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* create replacement binaries with exclusive temporary files ([295c785](https://github.com/SentioLabs/selfupdate-go/commit/295c78513bc9a29bf2359327dcabcc9ddbe676c5))
+* prevent staging symlinks from overwriting unrelated files ([58870ec](https://github.com/SentioLabs/selfupdate-go/commit/58870eca2c7b6612e5e9fa1f56dcb79303496e8e))
+
 ## [0.2.0](https://github.com/SentioLabs/selfupdate-go/compare/v0.1.2...v0.2.0) (2026-09-09)
 
 
