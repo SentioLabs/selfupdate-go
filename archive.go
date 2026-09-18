@@ -88,16 +88,13 @@ func (a *ArchiveInstaller) Prepare(ctx context.Context, rel Release) (Staged, er
 	return staged, nil
 }
 
-// Sweep removes a <target>.new left behind when an earlier install was
-// interrupted between writing the file and renaming it into place. The
-// name sits beside the binary in tab completion otherwise. Only a regular
-// file is removed; a missing file is not an error.
+// Sweep is retained for compatibility and does nothing. Replacement files
+// have unique names and are removed on ordinary failures. Files left by a
+// crash cannot safely be distinguished from another update's active files.
+//
+// Deprecated: ArchiveInstaller no longer requires sweeping.
 func (a *ArchiveInstaller) Sweep() error {
-	target, err := a.target()
-	if err != nil {
-		return err
-	}
-	return removeStaleNew(target)
+	return nil
 }
 
 // stage downloads asset into staged.dir, verifies it unless SkipChecksum,
