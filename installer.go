@@ -29,10 +29,8 @@ type Staged interface {
 
 // Sweeper is implemented by installers that can remove leftovers of an
 // interrupted install without a release in hand. Updater.Update calls it
-// on every run, so a stale <target>.new left by a crash disappears the
-// next time the user runs the update command, even when nothing new is
-// available. A Sweep failure is reported as a warning and never blocks
-// the update.
+// on every run, even when nothing new is available. A Sweep failure is
+// reported as a warning and never blocks the update.
 type Sweeper interface {
 	Sweep() error
 }

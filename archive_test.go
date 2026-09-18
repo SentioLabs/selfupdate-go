@@ -327,22 +327,24 @@ func TestArchiveInstaller_DefaultClientHeaderTimeout(t *testing.T) {
 	}
 }
 
-func TestArchiveInstaller_SweepRemovesStaleNew(t *testing.T) {
+func TestArchiveInstaller_SweepLeavesLegacyNewAlone(t *testing.T) {
 	target := writeTarget(t, contentOld)
 	writeStaleNew(t, target)
 	if err := newTestInstaller(target, io.Discard).Sweep(); err != nil {
 		t.Fatal(err)
 	}
-	assertNoLeftovers(t, target)
-	if got := readTarget(t, target); got != contentOld {
-		t.Fatalf("Sweep must not touch the target: %q", got)
+	if readTarget(t, target+".new") != "partial" {
+		t.Fatal("Sweep changed the legacy file")
+	}
+	if readTarget(t, target) != contentOld {
+		t.Fatal("Sweep changed the target")
 	}
 }
 
-func TestArchiveInstaller_SweepMissingTargetIsError(t *testing.T) {
+func TestArchiveInstaller_SweepMissingTargetIsNoOp(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "gone")
-	if err := newTestInstaller(missing, io.Discard).Sweep(); err == nil {
-		t.Fatal("a target that cannot be resolved must be reported")
+	if err := newTestInstaller(missing, io.Discard).Sweep(); err != nil {
+		t.Fatal(err)
 	}
 }
 

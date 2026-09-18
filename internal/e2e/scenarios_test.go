@@ -26,12 +26,21 @@ const (
 	dlChecksumsTxt = "/dl/checksums.txt"
 )
 
-// assertNoLeftovers fails when a .new or .old file sits beside path.
+// assertNoLeftovers checks both legacy and unique replacement file names.
 func assertNoLeftovers(t *testing.T, path string) {
 	t.Helper()
 	for _, leftover := range []string{path + ".new", path + ".old"} {
 		if _, err := os.Stat(leftover); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s must not exist after an update (stat err %v)", leftover, err)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "."+filepath.Base(path)+".new-") {
+			t.Errorf("temporary replacement left behind: %s", entry.Name())
 		}
 	}
 }

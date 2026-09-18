@@ -12,7 +12,8 @@ import (
 // linker already ad-hoc signs darwin/arm64 output, so this keeps parity
 // with the install script rather than adding a new requirement.
 func signBinary(path string) error {
-	out, err := exec.Command("codesign", "--force", "--sign", "-", path).CombinedOutput() //nolint:gosec // fixed program; path is the resolved target
+	// Fixed program; path is the resolved target.
+	out, err := exec.Command("codesign", "--force", "--sign", "-", path).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("codesign: %w: %s", err, out)
 	}
