@@ -68,13 +68,14 @@ The zero value works for a goreleaser project with default archive names.
 | `Client` | default transport with a 30s response header timeout | HTTP client |
 | `Out` | `os.Stdout` | progress lines |
 
-`Prepare` runs before any hook. It resolves the target, refuses a binary that
-lives under a package manager (the error names the manager and its upgrade
-command), refuses an unwritable directory, then downloads and verifies the
-archive into a temp directory. Nothing is downloaded when a check fails.
-`Commit` renames the extracted binary over the target and, on macOS, re-signs
-it ad hoc. On a terminal the download line shows a progress bar. Elsewhere it
-is a single line.
+`Prepare` runs before `PreInstall`. When `VerifyChecksums` is set, it runs
+inside `Prepare`, before the archive is downloaded. `Prepare` resolves the
+target, refuses a binary that lives under a package manager (the error names
+the manager and its upgrade command), refuses an unwritable directory, then
+downloads and verifies the archive into a temp directory. Nothing is
+downloaded when a check fails. `Commit` renames the extracted binary over the
+target and, on macOS, re-signs it ad hoc. On a terminal the download line
+shows a progress bar. Elsewhere it is a single line.
 
 Replacement binaries are written through an exclusively created temporary
 file beside the target, then atomically renamed into place. Existing
@@ -92,7 +93,7 @@ below.
 ## Verifying checksums
 
 `VerifyChecksums` runs before the archive is downloaded, and its error stops
-the update.
+the update. A checksum file the release lists no size for is capped at 1 MiB.
 
 ```go
 installer.VerifyChecksums = func(ctx context.Context, rel selfupdate.Release, path string) error {

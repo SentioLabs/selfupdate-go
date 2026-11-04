@@ -21,6 +21,14 @@ const DefaultAssetTemplate = "{name}_{version}_{os}_{arch}.tar.gz"
 // DefaultChecksumAsset is goreleaser's default checksum file name.
 const DefaultChecksumAsset = "checksums.txt"
 
+// maxChecksumBytes caps a checksum file the release lists no size for,
+// on the VerifyChecksums path.
+const maxChecksumBytes = 1 << 20
+
+// verifyDirMode is the permission set on the subdirectory of Prepare's
+// temp dir that holds the checksum file passed to VerifyChecksums.
+const verifyDirMode os.FileMode = 0o700
+
 // responseHeaderTimeout bounds how long the default client waits for
 // response headers. Bodies stream until ctx is cancelled.
 const responseHeaderTimeout = 30 * time.Second
@@ -40,7 +48,8 @@ type ArchiveInstaller struct {
 	// VerifyChecksums, when set, runs on the downloaded checksum file
 	// before it is trusted, for example to check a signature or an
 	// attestation. path is the file inside Prepare's temp dir. An error
-	// stops the update before the archive is downloaded.
+	// stops the update before the archive is downloaded. A checksum file
+	// the release lists no size for is capped at 1 MiB.
 	VerifyChecksums func(ctx context.Context, rel Release, path string) error
 	TargetPath      string           // default: os.Executable(); symlinks are always resolved
 	Managed         []ManagedInstall // nil means DefaultManagedInstalls; empty slice disables the check
@@ -143,10 +152,12 @@ func (a *ArchiveInstaller) downloadChecked(ctx context.Context, rel Release, ass
 	return nil
 }
 
-// downloadTrusted saves the checksum file into dir and passes it to
-// VerifyChecksums. Only after the hook accepts it is asset downloaded to
-// path and checked against the saved file, so the bytes the hook checked
-// are the bytes the archive is verified against.
+// downloadTrusted saves the checksum file into a verify subdirectory of
+// dir and passes it to VerifyChecksums. Only after the hook accepts it is
+// asset downloaded to path and checked against the saved file, so the
+// bytes the hook checked are the bytes the archive is verified against.
+// The saved file keeps only the base of the asset name, so it can neither
+// escape dir nor collide with the archive.
 func (a *ArchiveInstaller) downloadTrusted(
 	ctx context.Context, rel Release, asset Asset, path, dir string,
 ) error {
@@ -154,8 +165,12 @@ func (a *ArchiveInstaller) downloadTrusted(
 	if err != nil {
 		return err
 	}
-	checksumsPath := filepath.Join(dir, checksums.Name)
-	if _, err := a.downloadTo(ctx, checksums, checksumsPath, io.Discard); err != nil {
+	verifyDir := filepath.Join(dir, "verify")
+	if err := os.Mkdir(verifyDir, verifyDirMode); err != nil {
+		return fmt.Errorf("selfupdate: create verify dir: %w", err)
+	}
+	checksumsPath := filepath.Join(verifyDir, filepath.Base(checksums.Name))
+	if _, err := a.downloadTo(ctx, checksums, checksumsPath, io.Discard, maxChecksumBytes); err != nil {
 		return err
 	}
 	if err := a.VerifyChecksums(ctx, rel, checksumsPath); err != nil {
@@ -176,14 +191,16 @@ func (a *ArchiveInstaller) downloadTrusted(
 // progress bar on a terminal. It returns the SHA-256 of the bytes written.
 func (a *ArchiveInstaller) download(ctx context.Context, asset Asset, path string) ([]byte, error) {
 	a.printf("Downloading %s (%s)...\n", asset.Name, formatMB(asset.Size))
-	return a.downloadTo(ctx, asset, path, a.out())
+	return a.downloadTo(ctx, asset, path, a.out(), 0)
 }
 
 // downloadTo streams asset.URL to path, drawing progress to progressOut
 // when it is a terminal, and returns the SHA-256 of the bytes written.
-// When the release lists a size the body must match it exactly.
+// When the release lists a size the body must match it exactly. When it
+// lists none, a positive maxUnlisted caps the body and zero leaves it
+// unbounded.
 func (a *ArchiveInstaller) downloadTo(
-	ctx context.Context, asset Asset, path string, progressOut io.Writer,
+	ctx context.Context, asset Asset, path string, progressOut io.Writer, maxUnlisted int64,
 ) ([]byte, error) {
 	hash := sha256.New()
 	err := a.fetch(ctx, asset.URL, func(resp *http.Response) error {
@@ -192,7 +209,7 @@ func (a *ArchiveInstaller) downloadTo(
 			return fmt.Errorf("selfupdate: create download: %w", err)
 		}
 		progress := newProgressWriter(progressOut, resp.ContentLength)
-		copyErr := copyBounded(io.MultiWriter(f, hash, progress), resp.Body, asset.Size)
+		copyErr := copyBody(io.MultiWriter(f, hash, progress), resp.Body, asset.Size, maxUnlisted)
 		progress.Finish()
 		if closeErr := f.Close(); copyErr == nil {
 			copyErr = closeErr
@@ -206,6 +223,28 @@ func (a *ArchiveInstaller) downloadTo(
 		return nil, err
 	}
 	return hash.Sum(nil), nil
+}
+
+// copyBody streams body into dst. It applies copyBounded when size is
+// listed, and copyCapped when size is not and maxUnlisted is positive.
+func copyBody(dst io.Writer, body io.Reader, size, maxUnlisted int64) error {
+	if size <= 0 && maxUnlisted > 0 {
+		return copyCapped(dst, body, maxUnlisted)
+	}
+	return copyBounded(dst, body, size)
+}
+
+// copyCapped streams body into dst and reads at most limit+1 bytes. A
+// body longer than limit is an error.
+func copyCapped(dst io.Writer, body io.Reader, limit int64) error {
+	n, err := io.Copy(dst, io.LimitReader(body, limit+1))
+	if err != nil {
+		return err
+	}
+	if n > limit {
+		return fmt.Errorf("body exceeds %d bytes", limit)
+	}
+	return nil
 }
 
 // copyBounded streams body into dst. A positive size caps the read one
