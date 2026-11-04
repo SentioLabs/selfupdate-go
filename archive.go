@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,14 +33,19 @@ const binaryMode os.FileMode = 0o755
 // replaces the running executable in place. It needs no shell, curl or
 // install script.
 type ArchiveInstaller struct {
-	Name          string           // binary name inside the archive; default: base name of the resolved target
-	AssetTemplate string           // default DefaultAssetTemplate; {version} has no leading v
-	ChecksumAsset string           // default DefaultChecksumAsset
-	SkipChecksum  bool             // disable verification for repos that publish no checksum file
-	TargetPath    string           // default: os.Executable(); symlinks are always resolved
-	Managed       []ManagedInstall // nil means DefaultManagedInstalls; empty slice disables the check
-	Client        *http.Client     // default: a shared DefaultTransport clone with a 30s ResponseHeaderTimeout
-	Out           io.Writer        // progress lines; default os.Stdout
+	Name          string // binary name inside the archive; default: base name of the resolved target
+	AssetTemplate string // default DefaultAssetTemplate; {version} has no leading v
+	ChecksumAsset string // default DefaultChecksumAsset
+	SkipChecksum  bool   // disable verification for repos that publish no checksum file
+	// VerifyChecksums, when set, runs on the downloaded checksum file
+	// before it is trusted, for example to check a signature or an
+	// attestation. path is the file inside Prepare's temp dir. An error
+	// stops the update before the archive is downloaded.
+	VerifyChecksums func(ctx context.Context, rel Release, path string) error
+	TargetPath      string           // default: os.Executable(); symlinks are always resolved
+	Managed         []ManagedInstall // nil means DefaultManagedInstalls; empty slice disables the check
+	Client          *http.Client     // default: a shared DefaultTransport clone with a 30s ResponseHeaderTimeout
+	Out             io.Writer        // progress lines; default os.Stdout
 }
 
 // defaultClient is built on first use and shared by every ArchiveInstaller
@@ -59,8 +65,12 @@ type archiveStaged struct {
 
 // Prepare resolves the target, refuses managed or unwritable locations,
 // then downloads, verifies and extracts the platform asset into a temp
-// directory. The running binary is untouched.
+// directory. The running binary is untouched. VerifyChecksums together
+// with SkipChecksum is refused before anything else.
 func (a *ArchiveInstaller) Prepare(ctx context.Context, rel Release) (Staged, error) {
+	if a.VerifyChecksums != nil && a.SkipChecksum {
+		return nil, errors.New("selfupdate: VerifyChecksums needs the checksum file, but SkipChecksum is set")
+	}
 	target, err := a.target()
 	if err != nil {
 		return nil, err
@@ -98,12 +108,29 @@ func (a *ArchiveInstaller) Sweep() error {
 }
 
 // stage downloads asset into staged.dir, verifies it unless SkipChecksum,
-// and extracts name beside it.
+// and extracts name beside it. With VerifyChecksums set, the checksum file
+// is downloaded and passed to the hook before the archive is requested.
 func (a *ArchiveInstaller) stage(
 	ctx context.Context, rel Release, asset Asset, name string, staged *archiveStaged,
 ) error {
 	archivePath := filepath.Join(staged.dir, asset.Name)
-	sum, err := a.download(ctx, asset, archivePath)
+	var err error
+	if a.VerifyChecksums != nil {
+		err = a.downloadTrusted(ctx, rel, asset, archivePath, staged.dir)
+	} else {
+		err = a.downloadChecked(ctx, rel, asset, archivePath)
+	}
+	if err != nil {
+		return err
+	}
+	staged.binary = filepath.Join(staged.dir, name)
+	return extractTo(archivePath, name, staged.binary)
+}
+
+// downloadChecked downloads asset to path, then streams the checksum file
+// to verify it unless SkipChecksum. It is the path without VerifyChecksums.
+func (a *ArchiveInstaller) downloadChecked(ctx context.Context, rel Release, asset Asset, path string) error {
+	sum, err := a.download(ctx, asset, path)
 	if err != nil {
 		return err
 	}
@@ -113,22 +140,58 @@ func (a *ArchiveInstaller) stage(
 		}
 		a.printf("Verified %s\n", asset.Name)
 	}
-	staged.binary = filepath.Join(staged.dir, name)
-	return extractTo(archivePath, name, staged.binary)
+	return nil
 }
 
-// download streams asset.URL to path, drawing a progress bar on a
-// terminal, and returns the SHA-256 of the bytes written. When the release
-// lists a size the body must match it exactly.
+// downloadTrusted saves the checksum file into dir and passes it to
+// VerifyChecksums. Only after the hook accepts it is asset downloaded to
+// path and checked against the saved file, so the bytes the hook checked
+// are the bytes the archive is verified against.
+func (a *ArchiveInstaller) downloadTrusted(
+	ctx context.Context, rel Release, asset Asset, path, dir string,
+) error {
+	checksums, err := selectAsset(rel, a.checksumAsset())
+	if err != nil {
+		return err
+	}
+	checksumsPath := filepath.Join(dir, checksums.Name)
+	if _, err := a.downloadTo(ctx, checksums, checksumsPath, io.Discard); err != nil {
+		return err
+	}
+	if err := a.VerifyChecksums(ctx, rel, checksumsPath); err != nil {
+		return fmt.Errorf("selfupdate: verify %s: %w", checksums.Name, err)
+	}
+	sum, err := a.download(ctx, asset, path)
+	if err != nil {
+		return err
+	}
+	if err := verifySaved(checksumsPath, asset.Name, sum); err != nil {
+		return err
+	}
+	a.printf("Verified %s\n", asset.Name)
+	return nil
+}
+
+// download prints the download line and streams asset to path with a
+// progress bar on a terminal. It returns the SHA-256 of the bytes written.
 func (a *ArchiveInstaller) download(ctx context.Context, asset Asset, path string) ([]byte, error) {
 	a.printf("Downloading %s (%s)...\n", asset.Name, formatMB(asset.Size))
+	return a.downloadTo(ctx, asset, path, a.out())
+}
+
+// downloadTo streams asset.URL to path, drawing progress to progressOut
+// when it is a terminal, and returns the SHA-256 of the bytes written.
+// When the release lists a size the body must match it exactly.
+func (a *ArchiveInstaller) downloadTo(
+	ctx context.Context, asset Asset, path string, progressOut io.Writer,
+) ([]byte, error) {
 	hash := sha256.New()
 	err := a.fetch(ctx, asset.URL, func(resp *http.Response) error {
 		f, err := os.Create(path) // path is inside the temp dir created by Prepare
 		if err != nil {
 			return fmt.Errorf("selfupdate: create download: %w", err)
 		}
-		progress := newProgressWriter(a.out(), resp.ContentLength)
+		progress := newProgressWriter(progressOut, resp.ContentLength)
 		copyErr := copyBounded(io.MultiWriter(f, hash, progress), resp.Body, asset.Size)
 		progress.Finish()
 		if closeErr := f.Close(); copyErr == nil {
@@ -177,6 +240,21 @@ func (a *ArchiveInstaller) verify(ctx context.Context, rel Release, assetName st
 		}
 		return verifyChecksum(sums, assetName, sum)
 	})
+}
+
+// verifySaved checks sum against assetName's entry in the checksum file
+// saved at path.
+func verifySaved(path, assetName string, sum []byte) error {
+	f, err := os.Open(path) // path is inside the temp dir created by Prepare
+	if err != nil {
+		return fmt.Errorf("selfupdate: open checksums: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	sums, err := parseChecksums(f)
+	if err != nil {
+		return err
+	}
+	return verifyChecksum(sums, assetName, sum)
 }
 
 // fetch GETs url and hands the 200 response to fn. The body is closed

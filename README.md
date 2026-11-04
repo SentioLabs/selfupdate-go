@@ -62,6 +62,7 @@ The zero value works for a goreleaser project with default archive names.
 | `AssetTemplate` | `{name}_{version}_{os}_{arch}.tar.gz` | archive asset name. `{version}` has no leading `v` |
 | `ChecksumAsset` | `checksums.txt` | goreleaser checksum file |
 | `SkipChecksum` | `false` | set when the repo publishes no checksum file |
+| `VerifyChecksums` | `nil` | runs on the downloaded checksum file before it is trusted, e.g. to check a signature |
 | `TargetPath` | running executable, symlinks resolved | file to replace |
 | `Managed` | Homebrew Cellar, `/usr/{s,}bin`, `/usr/lib{,64,exec}`, Nix store | locations owned by a package manager |
 | `Client` | default transport with a 30s response header timeout | HTTP client |
@@ -84,8 +85,22 @@ leftover cannot safely be distinguished from another update's active file.
 The installation directory must be trusted against modification by other users.
 
 Linux and macOS with `.tar.gz` assets are supported. Windows is not.
-Verification proves the download matches what the release page lists. It
-does not prove who published it. Signature checking is out of scope.
+Verification proves the download matches what the release page lists. The
+library checks no signature itself. Set `VerifyChecksums` to check one, as
+below.
+
+## Verifying checksums
+
+`VerifyChecksums` runs before the archive is downloaded, and its error stops
+the update.
+
+```go
+installer.VerifyChecksums = func(ctx context.Context, rel selfupdate.Release, path string) error {
+    return exec.CommandContext(ctx, "gh", "attestation", "verify", path,
+        "--repo", "acme/mytool",
+        "--signer-workflow", "acme/mytool/.github/workflows/release.yml").Run()
+}
+```
 
 ## Hooks
 
