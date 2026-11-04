@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/SentioLabs/selfupdate-go/compare/v0.2.1...v0.3.0) (2026-11-04)
+
+
+### Features
+
+* add a VerifyChecksums hook to ArchiveInstaller ([#17](https://github.com/SentioLabs/selfupdate-go/issues/17)) ([9c38682](https://github.com/SentioLabs/selfupdate-go/commit/9c38682869cf7e4baf45bfc5f7a5e28f51cdc932))
+
 ## [0.2.1](https://github.com/SentioLabs/selfupdate-go/compare/v0.2.0...v0.2.1) (2026-09-18)
 
 
